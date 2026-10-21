@@ -74,7 +74,7 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 ## Customise
 
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
-- **Wallpapers:** see `05-wallpapers.ps1`. Photos you push stay on your TV and never go in this repo.
+- **Wallpapers:** see `05-wallpapers.ps1`. 
 
 ## Troubleshooting
 
