@@ -34,8 +34,7 @@ TV, run `-DryRun` first and edit the `$Groups` list at the top of `02-debloat.ps
 
 1. **TV:** Settings > System > About, click **Build** 7 times. Then Developer options: turn on **USB debugging**
    and **Network debugging** (or Wireless debugging). Note the TV's IP in Settings > Network.
-2. **Get the launcher APK.** Download `tvhome.apk` from this repo's **Releases** page, or fork the repo and
-   run **Actions > Build launcher APK** and download the `tvhome-apk` artifact.
+2. **Get the launcher APK.** Download `tvhome.apk` from this repo's **Releases** page.
 3. Clone or download this repo. Put `tvhome.apk` in the repo's root folder and open Command Prompt there.
 4. Back up the TV (read-only):
    ```
