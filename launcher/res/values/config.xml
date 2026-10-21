@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Launcher settings. Edit, then run launcher/build-and-install.sh.
+  Launcher settings. Edit, then rebuild (push to GitHub and download the new APK).
   Package names: tools/venv/bin/python -I tools/tv.py 'pm list packages'
 -->
 <resources>
     <!-- Dock apps, left to right. Apps that aren't installed are skipped. -->
     <string-array name="dock_apps">
         <item>com.google.android.youtube.tv</item>
-        <item>com.spotify.tv.android</item>
-        <item>com.nuvio.tv</item>
         <item>com.netflix.ninja</item>
         <item>com.amazon.amazonvideo.livingroom</item>
+        <item>com.spotify.tv.android</item>
+        <item>com.disney.disneyplus</item>
     </string-array>
 
     <!-- Never shown as tiles: system helpers, and the Live TV app (it's in the Inputs menu). -->
     <string-array name="hidden_apps">
+        <item>com.tcl.tv</item>
+        <item>com.tcl.suspension</item>
+        <item>com.tcl.t_solo</item>
+        <item>com.tcl.dashboard</item>
         <item>com.gretzky.hwinfo</item>
     </string-array>
 
