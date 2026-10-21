@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
 
     static final class App {
         String pkg, label;
+        boolean system;
         ComponentName component;
         Drawable art;
         boolean isBanner;
@@ -88,6 +89,7 @@ public class MainActivity extends Activity {
     private ImageView wallBack, wallFront;
     private View gridShade;
     private String[] wallpapers = new String[0];
+    private java.io.File[] extWalls = new java.io.File[0];
     private int wallIndex = -1;
     private long wallChangedAt;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -160,6 +162,8 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(rotateWallpaper);
         unregisterReceiver(tick);
         if (inputsPopup != null) inputsPopup.dismiss();
+        if (menuPopup != null) menuPopup.dismiss();
+        movingPkg = null;
     }
 
     @Override
@@ -206,6 +210,14 @@ public class MainActivity extends Activity {
         try {
             wallpapers = getAssets().list("wallpapers");
         } catch (java.io.IOException ignored) { }
+        java.io.File wd = getExternalFilesDir("wallpapers");
+        if (wd != null) {
+            java.io.File[] fs = wd.listFiles((dir, n) -> {
+                String x = n.toLowerCase(Locale.ROOT);
+                return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp");
+            });
+            if (fs != null && fs.length > 0) { Arrays.sort(fs); extWalls = fs; }
+        }
 
         glow = new View(this);
         root.addView(glow, new FrameLayout.LayoutParams(-1, -1));
@@ -347,9 +359,10 @@ public class MainActivity extends Activity {
         Map<String, App> byPkg = new HashMap<>();
         for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
             ActivityInfo ai = ri.activityInfo;
-            if (hidden.contains(ai.packageName) || byPkg.containsKey(ai.packageName)) continue;
+            if (hidden.contains(ai.packageName) || userHidden().contains(ai.packageName) || byPkg.containsKey(ai.packageName)) continue;
             App a = new App();
             a.pkg = ai.packageName;
+            a.system = (ai.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
             a.label = String.valueOf(ri.loadLabel(pm));
             a.component = new ComponentName(ai.packageName, ai.name);
             Drawable banner = ai.loadBanner(pm);
@@ -361,7 +374,7 @@ public class MainActivity extends Activity {
         }
 
         List<App> dock = new ArrayList<>();
-        for (String p : dockApps) if (byPkg.containsKey(p)) dock.add(byPkg.remove(p));
+        for (String p : dockOrder()) if (byPkg.containsKey(p)) dock.add(byPkg.remove(p));
         List<App> rest = new ArrayList<>(byPkg.values());
         Collections.sort(rest, (x, y) -> x.label.compareToIgnoreCase(y.label));
 
@@ -462,6 +475,7 @@ public class MainActivity extends Activity {
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(app.component)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)));
+        card.setOnLongClickListener(v -> { showAppMenu(card, app, inDock); return true; });
         card.setOnFocusChangeListener((v, has) -> {
             float s = has ? (inDock ? 1.12f : 1.1f) : 1f;
             v.animate().scaleX(s).scaleY(s).translationZ(has ? dp(14) : 0)
@@ -609,6 +623,124 @@ public class MainActivity extends Activity {
         return r;
     }
 
+    // ---------------------------------------------------------------- hold menu / layout
+
+    private PopupWindow menuPopup;
+    private String movingPkg;
+    private int swallowKey = -1;
+
+    private android.content.SharedPreferences layoutPrefs() { return getSharedPreferences("layout", MODE_PRIVATE); }
+
+    private String[] dockOrder() {
+        String s = layoutPrefs().getString("dock", null);
+        if (s == null) return dockApps;
+        return s.isEmpty() ? new String[0] : s.split(",");
+    }
+
+    private Set<String> userHidden() {
+        String s = layoutPrefs().getString("hidden", "");
+        return s.isEmpty() ? new HashSet<String>() : new HashSet<String>(Arrays.asList(s.split(",")));
+    }
+
+    private List<String> currentDock() {
+        List<String> l = new ArrayList<>();
+        for (View c : dockCards) l.add(((App) c.getTag()).pkg);
+        return l;
+    }
+
+    private void saveDock(List<String> l) {
+        layoutPrefs().edit().putString("dock", android.text.TextUtils.join(",", l)).apply();
+    }
+
+    private void focusDock(String pkg) {
+        for (View c : dockCards) if (((App) c.getTag()).pkg.equals(pkg)) { c.requestFocus(); return; }
+    }
+
+    private void moveBy(int d) {
+        List<String> l = currentDock();
+        int i = l.indexOf(movingPkg), j = i + d;
+        if (i < 0 || j < 0 || j >= l.size()) return;
+        Collections.swap(l, i, j);
+        saveDock(l);
+        buildApps();
+        focusDock(movingPkg);
+    }
+
+    private void showAppMenu(View anchor, App app, boolean inDock) {
+        List<String> labels = new ArrayList<>();
+        List<Runnable> acts = new ArrayList<>();
+        if (inDock) {
+            labels.add("Move");
+            acts.add(() -> {
+                movingPkg = app.pkg;
+                android.widget.Toast.makeText(this, "Use \u25C0 \u25B6 to move, OK when done", android.widget.Toast.LENGTH_LONG).show();
+            });
+            labels.add("Remove from dock");
+            acts.add(() -> { List<String> d = currentDock(); d.remove(app.pkg); saveDock(d); buildApps(); });
+        } else {
+            labels.add("Add to dock");
+            acts.add(() -> { List<String> d = currentDock(); d.add(app.pkg); saveDock(d); buildApps(); });
+        }
+        labels.add("Hide from home");
+        acts.add(() -> {
+            List<String> d = currentDock(); d.remove(app.pkg); saveDock(d);
+            Set<String> h = userHidden(); h.add(app.pkg);
+            layoutPrefs().edit().putString("hidden", android.text.TextUtils.join(",", h)).apply();
+            buildApps();
+        });
+        if (!app.system) {
+            labels.add("Delete app\u2026");
+            acts.add(() -> launch(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg))));
+        }
+        labels.add("Reset layout");
+        acts.add(() -> { layoutPrefs().edit().clear().apply(); buildApps(); });
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(8), dp(8), dp(8), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(16));
+        bg.setColor(0xF02A2A2E);
+        bg.setStroke(dp(1), 0x26FFFFFF);
+        list.setBackground(bg);
+        PopupWindow pw = new PopupWindow(list, dp(240), -2, true);
+        List<TextView> rows = new ArrayList<>();
+        for (int i = 0; i < labels.size(); i++) rows.add(inputRow(labels.get(i), acts.get(i)));
+        for (TextView r : rows) {
+            r.setOnClickListener(v -> { pw.dismiss(); ((Runnable) v.getTag()).run(); });
+            list.addView(r, new LinearLayout.LayoutParams(-1, dp(40)));
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            TextView r = rows.get(i);
+            r.setNextFocusUpId(rows.get(Math.max(0, i - 1)).getId());
+            r.setNextFocusDownId(rows.get(Math.min(rows.size() - 1, i + 1)).getId());
+            r.setNextFocusLeftId(r.getId());
+            r.setNextFocusRightId(r.getId());
+        }
+        pw.setOutsideTouchable(true);
+        pw.setElevation(dp(16));
+        pw.setOnDismissListener(() -> { menuPopup = null; if (anchor.isAttachedToWindow()) anchor.requestFocus(); });
+        menuPopup = pw;
+        pw.showAtLocation(anchor.getRootView(), Gravity.CENTER, 0, 0);
+        rows.get(0).requestFocus();
+    }
+
+    private Bitmap decodeSampled(java.io.File f) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), o);
+            int s = 1;
+            while (o.outWidth / (s * 2) >= 1920 && o.outHeight / (s * 2) >= 1080) s *= 2;
+            BitmapFactory.Options p = new BitmapFactory.Options();
+            p.inSampleSize = s;
+            p.inPreferredConfig = Bitmap.Config.RGB_565;
+            return BitmapFactory.decodeFile(f.getPath(), p);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     // ---------------------------------------------------------------- status
 
     private void updateClock() {
@@ -671,15 +803,18 @@ public class MainActivity extends Activity {
     /** Decode the next photo off the main thread, then crossfade it in over the current one. */
     private void nextWallpaper() {
         handler.removeCallbacks(rotateWallpaper);
-        if (wallpapers.length == 0) return;
+        int n = extWalls.length > 0 ? extWalls.length : wallpapers.length;
+        if (n == 0) return;
         if (wallIndex < 0) wallIndex = getPreferences(MODE_PRIVATE).getInt("wallpaper", -1);
-        wallIndex = (wallIndex + 1) % wallpapers.length;
+        wallIndex = (wallIndex + 1) % n;
         getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
         wallChangedAt = SystemClock.elapsedRealtime();
-        String name = "wallpapers/" + wallpapers[wallIndex];
+        final java.io.File ef = extWalls.length > 0 ? extWalls[wallIndex] : null;
+        final String name = ef == null ? "wallpapers/" + wallpapers[wallIndex] : "";
         new Thread(() -> {
             Bitmap bm = null;
-            try (java.io.InputStream in = getAssets().open(name)) {
+            if (ef != null) bm = decodeSampled(ef);
+            else try (java.io.InputStream in = getAssets().open(name)) {
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inPreferredConfig = Bitmap.Config.RGB_565;
                 bm = BitmapFactory.decodeStream(in, null, o);
@@ -825,6 +960,18 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        int k = e.getKeyCode();
+        if (e.getAction() == KeyEvent.ACTION_UP && k == swallowKey) { swallowKey = -1; return true; }
+        if (movingPkg != null) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                if (k == KeyEvent.KEYCODE_DPAD_LEFT) moveBy(-1);
+                else if (k == KeyEvent.KEYCODE_DPAD_RIGHT) moveBy(1);
+                else if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_BACK) {
+                    movingPkg = null; swallowKey = k;
+                }
+            }
+            return true;
+        }
         // Menu key on the remote opens the Inputs dropdown.
         if (e.getKeyCode() == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP && !pills.isEmpty()) {
             showInputs(pills.get(0));
