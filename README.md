@@ -29,7 +29,6 @@ TV, run `-DryRun` first and edit the `$Groups` list at the top of `02-debloat.ps
 
 - Windows 10/11 and a TV on the same Wi-Fi as your PC
 - [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) (`winget install Google.PlatformTools`)
-- A free GitHub account, only to build the launcher APK (no Android Studio needed)
 
 ## Quick start
 
@@ -75,23 +74,15 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 ## Customise
 
-- **Dock apps, hidden apps, grid columns:** edit [`launcher/res/values/config.xml`](launcher/res/values/config.xml),
-  commit, and download the new APK from the Actions run.
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
 - **Wallpapers:** see `05-wallpapers.ps1`. Photos you push stay on your TV and never go in this repo.
-
-## Releases
-
-On GitHub: **Releases > Draft a new release**, pick a tag such as `v1.0.0`, and publish. The workflow
-builds the APK and attaches it to the release.
 
 ## Troubleshooting
 
 - **`adb` not found:** open a new terminal after installing, or use `-AdbPath`.
 - **`failed to authenticate`:** accept the **Allow USB debugging?** prompt on the TV.
 - **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** the installed launcher was signed with a different key.
-  `04-install-launcher.ps1` offers to switch back to the stock home, remove it and reinstall. The workflow
-  caches one signing key so this should only happen if the cache is lost.
+  `04-install-launcher.ps1` offers to switch back to the stock home, remove it and reinstall. 
 - **Home button misbehaves:** run `04-install-launcher.ps1 -Revert`. On Google TV the setup app
   (`com.google.android.tungsten.setupwraith`) can hijack Home, which is why the script disables it with the stock launcher.
 - **Wi-Fi forgot its password after the swap:** it happened once on the tested box. Re-enter it.
@@ -108,4 +99,4 @@ builds the APK and attaches it to the release.
 - Launcher and original tooling: [Mihir Gupta](https://github.com/mihirgupta0900/tv-home), MIT.
 - Windows scripts and launcher changes: this repo's contributors, MIT. See [LICENSE](LICENSE).
 - Wallpapers are from Wikimedia Commons under CC BY-SA. Attribution is in
-  [`launcher/WALLPAPER-CREDITS.md`](launcher/WALLPAPER-CREDITS.md). If you add your own photos to `launcher/assets`, credit them there.
+  [`launcher/WALLPAPER-CREDITS.md`](launcher/WALLPAPER-CREDITS.md). 
