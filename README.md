@@ -1,4 +1,4 @@
-# tv-home (Windows edition)
+# clean-tv (Windows edition)
 
 Clean up a slow, ad-filled Android TV / Google TV box from a **Windows PC**, then give it a fast,
 minimal **Apple TV-style home screen**: a dock of your favourite apps over rotating nature wallpapers.
