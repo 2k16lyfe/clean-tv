@@ -1,0 +1,12 @@
+# Local files that belong to your own TV. Never publish these.
+backups/
+last_tv.txt
+last_backup.txt
+tv-devices.json
+
+# Your own wallpapers (the built-in ones live in launcher/assets/wallpapers)
+/wallpapers/
+
+# Signing keys and local APKs
+*.keystore
+/tvhome.apk
