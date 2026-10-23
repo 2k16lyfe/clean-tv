@@ -14,11 +14,14 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.ImageDecoder;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.AnimatedImageDrawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
@@ -185,6 +188,7 @@ public class MainActivity extends Activity {
         else if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= iv) nextWallpaper();
         else scheduleWallpaper(iv - (SystemClock.elapsedRealtime() - wallChangedAt));
         lastInput = SystemClock.elapsedRealtime();
+        playWall(wallFront, true);
         handler.removeCallbacks(idleTick);
         handler.postDelayed(idleTick, 10_000);
     }
@@ -194,6 +198,8 @@ public class MainActivity extends Activity {
         super.onPause();
         handler.removeCallbacks(rotateWallpaper);
         handler.removeCallbacks(idleTick);
+        playWall(wallFront, false);
+        playWall(wallBack, false);
         if (idleOn) exitIdle();
         unregisterReceiver(tick);
         if (inputsPopup != null) inputsPopup.dismiss();
@@ -256,7 +262,7 @@ public class MainActivity extends Activity {
         if (wd != null) {
             java.io.File[] fs = wd.listFiles((dir, n) -> {
                 String x = n.toLowerCase(Locale.ROOT);
-                return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp");
+                return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp") || x.endsWith(".gif");
             });
             if (fs != null && fs.length > 0) { Arrays.sort(fs); extWalls = fs; }
         }
@@ -1292,7 +1298,7 @@ public class MainActivity extends Activity {
         final int start = rotating ? (wallIndex + 1) % pool.length : 0;
         wallChangedAt = SystemClock.elapsedRealtime();
         new Thread(() -> {
-            Bitmap bm = null;
+            Drawable bm = null;
             String key = "";
             int used = start;
             if (!rotating && !chosen.isEmpty()) {
@@ -1305,7 +1311,7 @@ public class MainActivity extends Activity {
                 bm = loadWall(pool[used]);
                 if (bm != null) key = pool[used];
             }
-            final Bitmap result = bm;
+            final Drawable result = bm;
             final int shown = used;
             final String shownK = key;
             runOnUiThread(() -> {
@@ -1322,7 +1328,7 @@ public class MainActivity extends Activity {
         if (rotating) scheduleWallpaper(wallIntervalMs());
     }
 
-    private void showWallpaper(Bitmap bm) {
+    private void showWallpaper(Drawable bm) {
         if (bm == null || isDestroyed()) return;
         // Swap roles: the old front becomes the back, the new photo fades in on top.
         ImageView old = wallFront;
@@ -1331,9 +1337,11 @@ public class MainActivity extends Activity {
         ViewGroup root = (ViewGroup) wallFront.getParent();
         root.removeView(wallFront);
         root.addView(wallFront, 1, new FrameLayout.LayoutParams(-1, -1));
-        wallFront.setImageBitmap(bm);
+        wallFront.setImageDrawable(bm);
+        playWall(wallFront, true);
         wallFront.setAlpha(0f);
         wallFront.animate().alpha(1f).setDuration(firstWallpaper ? 600 : 2000).withEndAction(() -> {
+            playWall(wallBack, false);
             wallBack.setImageDrawable(null); // release the previous photo
         }).start();
         firstWallpaper = false;
@@ -1507,7 +1515,7 @@ public class MainActivity extends Activity {
         java.io.File wd = getExternalFilesDir("wallpapers");
         java.io.File[] fs = wd == null ? null : wd.listFiles((dir, n) -> {
             String x = n.toLowerCase(Locale.ROOT);
-            return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp");
+            return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp") || x.endsWith(".gif");
         });
         if (fs == null) fs = new java.io.File[0];
         Arrays.sort(fs);
@@ -1529,17 +1537,49 @@ public class MainActivity extends Activity {
         return l;
     }
 
-    private Bitmap loadWall(String key) {
+    private Drawable loadWall(String key) {
         try {
-            if (key.startsWith("c:")) return decodeSampled(new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2)));
+            if (key.startsWith("c:")) {
+                java.io.File f = new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2));
+                if (f.getName().toLowerCase(Locale.ROOT).endsWith(".gif")) {
+                    Drawable anim = decodeAnimated(f);
+                    if (anim != null) return anim;
+                }
+                Bitmap b = decodeSampled(f);
+                return b == null ? null : new BitmapDrawable(getResources(), b);
+            }
             try (java.io.InputStream in = getAssets().open("wallpapers/" + key.substring(2))) {
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inPreferredConfig = Bitmap.Config.RGB_565;
-                return BitmapFactory.decodeStream(in, null, o);
+                Bitmap b = BitmapFactory.decodeStream(in, null, o);
+                return b == null ? null : new BitmapDrawable(getResources(), b);
             }
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Animated GIF, scaled down to roughly 1080p so it stays light on a small TV box. */
+    private Drawable decodeAnimated(java.io.File f) {
+        try {
+            return ImageDecoder.decodeDrawable(ImageDecoder.createSource(f), (decoder, info, src) -> {
+                int w = info.getSize().getWidth(), h = info.getSize().getHeight();
+                int sc = 1;
+                while (w / (sc * 2) >= 1920 && h / (sc * 2) >= 1080) sc *= 2;
+                if (sc > 1) decoder.setTargetSampleSize(sc);
+            });
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private void playWall(ImageView v, boolean play) {
+        if (v == null) return;
+        Drawable d = v.getDrawable();
+        if (!(d instanceof AnimatedImageDrawable)) return;
+        AnimatedImageDrawable a = (AnimatedImageDrawable) d;
+        if (play) { a.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE); a.start(); }
+        else a.stop();
     }
 
     private int thumbSample(int w) {
@@ -1725,6 +1765,16 @@ public class MainActivity extends Activity {
                 iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
                 ivs.add(iv);
+                if (key.toLowerCase(Locale.ROOT).endsWith(".gif")) {
+                    TextView gb = text(11, "sans-serif-medium", Color.WHITE);
+                    gb.setText("GIF");
+                    gb.setPadding(dp(7), dp(2), dp(7), dp(2));
+                    GradientDrawable gbg = new GradientDrawable();
+                    gbg.setCornerRadius(dp(6));
+                    gbg.setColor(0xB3000000);
+                    gb.setBackground(gbg);
+                    card.addView(gb, lp(-2, -2, Gravity.BOTTOM | Gravity.START, dp(6), 0, 0, dp(6)));
+                }
                 if (key.equals(sel)) {
                     TextView ck = text(15, "sans-serif-medium", Color.WHITE);
                     ck.setText("\u2713");
