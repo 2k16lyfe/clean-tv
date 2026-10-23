@@ -146,9 +146,14 @@ public class MainActivity extends Activity {
         registerReceiver(tick, tf);
         updateClock();
         updateWifi();
-        View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
-        if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
-        if (last != null) last.requestFocus();
+        if (wii()) {
+            // The Apple dock is hidden in the Wii themes; focusing it would trap the D-pad offscreen.
+            if (wiiLayer != null && wiiLayer.findFocus() == null) buildWiiGrid(0, 0);
+        } else {
+            View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
+            if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
+            if (last != null) last.requestFocus();
+        }
         // Catch installs/removals that happened while another app was in front.
         if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
@@ -803,6 +808,9 @@ public class MainActivity extends Activity {
         wiiLayer.setVisibility(w ? View.VISIBLE : View.GONE);
         scroll.setVisibility(w ? View.GONE : View.VISIBLE);
         if (w && wiiBuiltTheme != (wiiDark() ? 1 : 0)) rebuildWii();
+        // Whichever layer is hidden must not be able to hold focus, or the D-pad gets stuck on it.
+        scroll.setDescendantFocusability(w ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+        wiiLayer.setDescendantFocusability(w ? ViewGroup.FOCUS_BEFORE_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         updateThemePills();
         if (w) {
             buildWiiGrid(0, 0);
@@ -821,7 +829,7 @@ public class MainActivity extends Activity {
         wiiBuiltTheme = d ? 1 : 0;
         wBg1 = d ? 0xFF1B2430 : 0xFFFFFFFF;  wBg2 = d ? 0xFF0D131A : 0xFFE6EBF0;
         wTile = d ? 0xFF263140 : 0xFFFFFFFF; wEdge = d ? 0xFF3A4757 : 0xFFC9D2DC;
-        wText = d ? 0xFFD5DEE8 : 0xFF5B6670; wSub = d ? 0xFF8C99A8 : wSub;
+        wText = d ? 0xFFD5DEE8 : 0xFF5B6670; wSub = d ? 0xFF8C99A8 : 0xFF7C8793;
         wBar1 = d ? 0xFF222D3A : 0xFFF7F9FB; wBar2 = d ? 0xFF141B24 : 0xFFDCE3EA;
         wEmptyFill = d ? 0xFF1C2531 : 0xFFF1F4F7; wEmptyEdge = d ? 0xFF2B3644 : 0xFFE0E6EC;
         wBlue = d ? 0xFF4FC3F7 : 0xFF36A9E1;
