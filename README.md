@@ -23,7 +23,7 @@ can be undone with a script.
 - **One menu for everything.** Double-click `clean-tv.bat` instead of typing the PowerShell commands. The scripts below still work on their own.
 - **Wallpaper settings on the TV.** A **Wallpapers** button opens a clean panel: choose Rotating or Static, pick how often
   the photo changes (1 minute to 1 hour), or pick one photo from a grid of previews.
-- **Your own wallpapers** pushed from a folder, no rebuild needed.
+- **Your own wallpapers** pushed from a folder, no rebuild needed. Animated **GIFs** work too.
 - **Idle screen.** After a few minutes with nothing pressed, the apps hide and the wallpaper fills the screen with the time
   in the corner. Any button brings the apps back. The delay is set in the Wallpapers panel (Off, 2, 5, 10 or 30 minutes).
 - **Undo scripts** for the debloat and for the home screen.
@@ -50,22 +50,24 @@ TV, run `-DryRun` first and edit the `$Groups` list at the top of `02-debloat.ps
    and **Network debugging** (or Wireless debugging). Note the TV's IP in Settings > Network.
 2. **Get the launcher APK.** Download `tvhome.apk` from this repo's **Releases** page.
 3. Clone or download this repo. Put `tvhome.apk` in the repo's root folder and open Command Prompt there.
+   You can run steps 4 to 6 as commands, or double-click `clean-tv.bat` for a menu. In the menu, press **T**
+   and type your TV's IP (like `192.168.1.50`) first, then pick the number shown under each step.
 4. Back up the TV (read-only):
    ```
    powershell -ExecutionPolicy Bypass -File .\windows\01-backup.ps1 -TvIp 192.168.1.50
    ```
-   Accept **Allow USB debugging?** on the TV (Always allow) and run it again if it stopped.
+   Menu: press **1**. Accept **Allow USB debugging?** on the TV (Always allow) and run it again if it stopped.
 5. Preview the debloat, then run it:
    ```
    powershell -ExecutionPolicy Bypass -File .\windows\02-debloat.ps1 -DryRun
    powershell -ExecutionPolicy Bypass -File .\windows\02-debloat.ps1
    ```
-   Read each yes/no carefully. The default is No.
+   Menu: press **2** to preview, then **3** to run it. Read each yes/no carefully. The default is No.
 6. Install the home screen:
    ```
    powershell -ExecutionPolicy Bypass -File .\windows\04-install-launcher.ps1
    ```
-   Then open an app and press **Home** on the remote to check it returns to the new home screen.
+   Menu: press **6**. Then open an app and press **Home** on the remote to check it returns to the new home screen.
 
 ## Commands
 
@@ -80,7 +82,7 @@ Run from the repo root. Prefix each with `powershell -ExecutionPolicy Bypass -Fi
 | `.\windows\03-restore.ps1 -Everything` | Re-enables everything that was enabled at backup time. |
 | `.\windows\04-install-launcher.ps1` | Installs the launcher and makes it your home screen. |
 | `.\windows\04-install-launcher.ps1 -Revert` | Goes back to the stock home screen. |
-| `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png) to the TV. |
+| `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png, or animated .gif) to the TV. |
 | `.\windows\05-wallpapers.ps1 -Clear` | Goes back to the built-in photos. |
 | `.\windows\06-reset-launcher.ps1` | Resets the launcher to defaults (Apple style, default layout). Fixes a stuck cursor. |
 | `.\windows\07-screensaver.ps1` | Turns off Google TV's own screensaver so the launcher's idle screen is the only one. Add `-On` to undo. |
@@ -92,7 +94,7 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
 - **Theme:** press the **Theme** button (top left in the Wii styles, next to Inputs and Wi-Fi in the Apple style) to cycle Apple, Wii and Wii Dark. The Wii styles are a 4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. They have no dock, so the hold-OK menu there offers Move, Hide, Unhide apps, Delete and Reset layout. The Wii grid keeps its own order, separate from the Apple dock.
 - **Wallpapers:** press the **Wallpapers** button (next to Theme). Choose **Rotating** and a delay, or **Static** and tap a preview.
-  Your own photos come from `05-wallpapers.ps1`; the panel shows how many are on the TV. The Apple style shows the wallpaper behind the dock;
+  Your own photos and GIFs come from `05-wallpapers.ps1`; the panel shows how many are on the TV, and GIF previews carry a small GIF tag. The Apple style shows the wallpaper behind the dock;
   the Wii styles use their own background but show it on the idle screen.
 - **Idle screen:** set in the Wallpapers panel. Run `07-screensaver.ps1` once so Google TV's own screensaver does not start first.
 
@@ -101,6 +103,8 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **`adb` not found:** open a new terminal after installing, or use `-AdbPath`.
 - **`failed to authenticate`:** accept the **Allow USB debugging?** prompt on the TV.
 - **Cursor stuck after updating while on a Wii theme:** older builds could start with focus on a hidden tile. Reset the launcher with `adb shell pm clear com.mihir.tvhome` (add `-s <TV_IP>:5555` if adb says more than one device), which returns it to the Apple style. Fixed in newer builds. To be safe on an old build, switch to the Apple theme before installing a new `tvhome.apk`.
+- **A GIF wallpaper stutters:** small TV boxes can struggle with big animations. Keep GIFs under about 15 MB and no larger than 1920x1080
+  (shorter and smaller is smoother). The launcher scales big ones down, and animation pauses while you are in another app.
 - **Custom wallpapers do not seem to change:** the default is one photo every 10 minutes, and a photo that cannot be read is skipped.
   Open the **Wallpapers** panel to shorten the delay. If it says 0 of your photos, push them again with `05-wallpapers.ps1`
   (reinstalling or resetting the launcher removes them). Check with `adb shell ls -l /sdcard/Android/data/com.mihir.tvhome/files/wallpapers`.
