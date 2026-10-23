@@ -105,6 +105,25 @@ public class MainActivity extends Activity {
     private boolean firstShow = true;
     private int packageSeq;
     private PopupWindow inputsPopup;
+    private FrameLayout rootView;
+    private View scrimView;
+    private TextView wallPill, wiiWallPill;
+    private FrameLayout wallPanel;
+    private int thumbGen = 0;
+    private String shownKey = "";
+    // Idle (ambient) screen: apps hide, wallpaper goes full screen with a small clock.
+    private boolean idleOn;
+    private long lastInput = SystemClock.elapsedRealtime();
+    private FrameLayout idleLayer;
+    private TextView idleClock, idleDate;
+    private final Runnable idleTick = new Runnable() {
+        @Override public void run() {
+            int m = idleMinutes();
+            if (!idleOn && m > 0 && !popupOpen() && movingPkg == null && !wallPanelShowing()
+                    && SystemClock.elapsedRealtime() - lastInput >= m * 60_000L) enterIdle();
+            handler.postDelayed(this, 10_000);
+        }
+    };
 
     private final BroadcastReceiver tick = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) { updateClock(); updateWifi(); }
@@ -161,14 +180,21 @@ public class MainActivity extends Activity {
         if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
-        if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) nextWallpaper();
-        else scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
+        long iv = wallIntervalMs();
+        if (!wallRotating()) { if (!wallStaticKey().equals(shownKey)) nextWallpaper(); }
+        else if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= iv) nextWallpaper();
+        else scheduleWallpaper(iv - (SystemClock.elapsedRealtime() - wallChangedAt));
+        lastInput = SystemClock.elapsedRealtime();
+        handler.removeCallbacks(idleTick);
+        handler.postDelayed(idleTick, 10_000);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(rotateWallpaper);
+        handler.removeCallbacks(idleTick);
+        if (idleOn) exitIdle();
         unregisterReceiver(tick);
         if (inputsPopup != null) inputsPopup.dismiss();
         if (menuPopup != null) menuPopup.dismiss();
@@ -185,6 +211,9 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         // Home pressed while already home: jump back to the first dock app.
+        lastInput = SystemClock.elapsedRealtime();
+        if (idleOn) { exitIdle(); return; }
+        if (wallPanelShowing()) closeWallPanel();
         if (inputsPopup != null) inputsPopup.dismiss();
         if (wii()) { wiiPage = 0; buildWiiGrid(0, 0); return; }
         if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
@@ -193,6 +222,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (wallPanelShowing()) { closeWallPanel(); return; }
         // Home has nowhere to go back to; Back from the grid returns to the dock.
         if (scroll.getScrollY() > 0 && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
     }
@@ -201,6 +231,7 @@ public class MainActivity extends Activity {
 
     private View buildUi() {
         FrameLayout root = new FrameLayout(this);
+        rootView = root;
         root.setBackgroundColor(Color.BLACK);
 
         // Wallpaper: two stacked layers so a new photo can crossfade in over the old one.
@@ -213,6 +244,7 @@ public class MainActivity extends Activity {
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xB3000000, 0x40000000, 0x26000000, 0x8C000000, 0xE6000000}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+        scrimView = scrim;
         gridShade = new View(this);
         gridShade.setBackgroundColor(0xB3000000);
         gridShade.setAlpha(0f);
@@ -327,13 +359,15 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         themePill = pill("Apple", "\u25D0");
         themePill.setOnClickListener(v -> cycleTheme());
+        wallPill = pill("Wallpapers", "\u25A3");
+        wallPill.setOnClickListener(v -> showWallPanel(null));
         TextView inputs = pill("Inputs", "⇥");
         inputs.setOnClickListener(v -> showInputs(v));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{themePill, inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{themePill, wallPill, inputs, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }
@@ -888,7 +922,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyTheme() {
-        if (wiiLayer == null) return;
+        if (wiiLayer == null || idleOn) return;
         boolean w = wii();
         wiiLayer.setVisibility(w ? View.VISIBLE : View.GONE);
         scroll.setVisibility(w ? View.GONE : View.VISIBLE);
@@ -989,10 +1023,17 @@ public class MainActivity extends Activity {
         w.addView(wiiWifi, wbp);
         wiiThemePill = wiiButton("\u25D0  Theme", "Change theme", false);
         wiiThemePill.setOnClickListener(v -> cycleTheme());
-        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-2, dp(38), Gravity.TOP | Gravity.START);
+        wiiWallPill = wiiButton("\u25A3  Wallpapers", "Wallpapers", false);
+        wiiWallPill.setOnClickListener(v -> showWallPanel(null));
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setClipChildren(false);
+        topRow.addView(wiiThemePill, new LinearLayout.LayoutParams(-2, dp(38)));
+        topRow.addView(wiiWallPill, llp(-2, dp(38), dp(10), 0, 0, 0));
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
         tp.leftMargin = (int) (W * 0.08f);
         tp.topMargin = dp(16);
-        w.addView(wiiThemePill, tp);
+        w.addView(topRow, tp);
 
         // Pointing-hand cursor that glides to whatever is focused.
         wiiHand = new HandView(this);
@@ -1171,6 +1212,7 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- status
 
     private void updateClock() {
+        updateIdleClock();
         updateWiiClock();
         Calendar now = Calendar.getInstance();
         int h = now.get(Calendar.HOUR_OF_DAY);
@@ -1241,26 +1283,43 @@ public class MainActivity extends Activity {
     /** Decode the next photo off the main thread, then crossfade it in over the current one. */
     private void nextWallpaper() {
         handler.removeCallbacks(rotateWallpaper);
-        int n = extWalls.length > 0 ? extWalls.length : wallpapers.length;
-        if (n == 0) return;
+        scanCustomWalls();
+        final String[] pool = wallPool();
+        if (pool.length == 0) return;
+        final boolean rotating = wallRotating();
+        final String chosen = wallStaticKey();
         if (wallIndex < 0) wallIndex = getPreferences(MODE_PRIVATE).getInt("wallpaper", -1);
-        wallIndex = (wallIndex + 1) % n;
-        getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
+        final int start = rotating ? (wallIndex + 1) % pool.length : 0;
         wallChangedAt = SystemClock.elapsedRealtime();
-        final java.io.File ef = extWalls.length > 0 ? extWalls[wallIndex] : null;
-        final String name = ef == null ? "wallpapers/" + wallpapers[wallIndex] : "";
         new Thread(() -> {
             Bitmap bm = null;
-            if (ef != null) bm = decodeSampled(ef);
-            else try (java.io.InputStream in = getAssets().open(name)) {
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inPreferredConfig = Bitmap.Config.RGB_565;
-                bm = BitmapFactory.decodeStream(in, null, o);
-            } catch (java.io.IOException ignored) { }
-            Bitmap result = bm;
-            runOnUiThread(() -> showWallpaper(result));
+            String key = "";
+            int used = start;
+            if (!rotating && !chosen.isEmpty()) {
+                bm = loadWall(chosen);
+                if (bm != null) key = chosen;
+            }
+            // A photo that cannot be read is skipped, so one bad file never freezes the background.
+            for (int i = 0; i < pool.length && bm == null; i++) {
+                used = (start + i) % pool.length;
+                bm = loadWall(pool[used]);
+                if (bm != null) key = pool[used];
+            }
+            final Bitmap result = bm;
+            final int shown = used;
+            final String shownK = key;
+            runOnUiThread(() -> {
+                if (rotating) {
+                    wallIndex = shown;
+                    getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", shown).apply();
+                } else if (chosen.isEmpty() && !shownK.isEmpty()) {
+                    wallPrefs().edit().putString("staticKey", shownK).apply();
+                }
+                shownKey = shownK;
+                showWallpaper(result);
+            });
         }).start();
-        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
+        if (rotating) scheduleWallpaper(wallIntervalMs());
     }
 
     private void showWallpaper(Bitmap bm) {
@@ -1399,6 +1458,12 @@ public class MainActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
+        lastInput = SystemClock.elapsedRealtime();
+        if (idleOn) {
+            // Any button wakes the home screen; the press that woke it does nothing else.
+            if (e.getAction() == KeyEvent.ACTION_DOWN) { exitIdle(); swallowKey = k; }
+            return true;
+        }
         if (e.getAction() == KeyEvent.ACTION_UP && k == swallowKey) { swallowKey = -1; return true; }
         if (movingPkg != null) {
             if (e.getAction() == KeyEvent.ACTION_DOWN) {
@@ -1418,6 +1483,365 @@ public class MainActivity extends Activity {
             return true;
         }
         return super.dispatchKeyEvent(e);
+    }
+
+    // ---------------------------------------------------------------- wallpaper settings + idle screen
+
+    private android.content.SharedPreferences wallPrefs() { return getSharedPreferences("wall", MODE_PRIVATE); }
+
+    private boolean wallRotating() { return !"static".equals(wallPrefs().getString("mode", "rotate")); }
+
+    private long wallIntervalMs() { return Math.max(1, wallPrefs().getInt("delayMin", 10)) * 60_000L; }
+
+    private int idleMinutes() { return wallPrefs().getInt("idleMin", 5); }
+
+    private String wallStaticKey() { return wallPrefs().getString("staticKey", ""); }
+
+    private boolean popupOpen() {
+        return (inputsPopup != null && inputsPopup.isShowing()) || (menuPopup != null && menuPopup.isShowing());
+    }
+
+    private boolean wallPanelShowing() { return wallPanel != null && wallPanel.getParent() != null; }
+
+    private void scanCustomWalls() {
+        java.io.File wd = getExternalFilesDir("wallpapers");
+        java.io.File[] fs = wd == null ? null : wd.listFiles((dir, n) -> {
+            String x = n.toLowerCase(Locale.ROOT);
+            return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp");
+        });
+        if (fs == null) fs = new java.io.File[0];
+        Arrays.sort(fs);
+        extWalls = fs;
+    }
+
+    /** What rotation cycles through: your photos if you pushed any, otherwise the built-in ones. */
+    private String[] wallPool() {
+        List<String> l = new ArrayList<>();
+        if (extWalls.length > 0) { for (java.io.File f : extWalls) l.add("c:" + f.getName()); }
+        else { for (String w : wallpapers) l.add("b:" + w); }
+        return l.toArray(new String[0]);
+    }
+
+    private List<String> allWallKeys() {
+        List<String> l = new ArrayList<>();
+        for (java.io.File f : extWalls) l.add("c:" + f.getName());
+        for (String w : wallpapers) l.add("b:" + w);
+        return l;
+    }
+
+    private Bitmap loadWall(String key) {
+        try {
+            if (key.startsWith("c:")) return decodeSampled(new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2)));
+            try (java.io.InputStream in = getAssets().open("wallpapers/" + key.substring(2))) {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inPreferredConfig = Bitmap.Config.RGB_565;
+                return BitmapFactory.decodeStream(in, null, o);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int thumbSample(int w) {
+        int s = 1;
+        while (w / (s * 2) >= 360) s *= 2;
+        return s;
+    }
+
+    private Bitmap decodeThumb(String key) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inPreferredConfig = Bitmap.Config.RGB_565;
+            if (key.startsWith("c:")) {
+                String path = new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2)).getPath();
+                o.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, o);
+                o.inSampleSize = thumbSample(o.outWidth);
+                o.inJustDecodeBounds = false;
+                return BitmapFactory.decodeFile(path, o);
+            }
+            String asset = "wallpapers/" + key.substring(2);
+            try (java.io.InputStream in = getAssets().open(asset)) {
+                o.inJustDecodeBounds = true;
+                BitmapFactory.decodeStream(in, null, o);
+            }
+            o.inSampleSize = thumbSample(o.outWidth);
+            o.inJustDecodeBounds = false;
+            try (java.io.InputStream in = getAssets().open(asset)) {
+                return BitmapFactory.decodeStream(in, null, o);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private TextView panelLabel(String s) {
+        TextView t = text(12, "sans-serif-medium", 0x99FFFFFF);
+        t.setText(s.toUpperCase(Locale.ROOT));
+        t.setLetterSpacing(0.18f);
+        return t;
+    }
+
+    private LinearLayout chipRow() {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setClipChildren(false);
+        return r;
+    }
+
+    private TextView chip(String label, boolean on, String tag, Runnable action) {
+        TextView c = text(14, "sans-serif-medium", on ? 0xFF111111 : 0xE6FFFFFF);
+        c.setText(label);
+        c.setGravity(Gravity.CENTER);
+        c.setPadding(dp(18), 0, dp(18), 0);
+        c.setFocusable(true);
+        c.setId(View.generateViewId());
+        c.setTag(tag);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(19));
+        bg.setColor(on ? 0xF2FFFFFF : 0x33FFFFFF);
+        bg.setStroke(dp(2), 0x00000000);
+        c.setBackground(bg);
+        c.setOnFocusChangeListener((v, has) -> {
+            bg.setStroke(dp(2), has ? 0xFF4FC3F7 : 0x00000000);
+            v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(120).start();
+        });
+        c.setOnClickListener(v -> action.run());
+        return c;
+    }
+
+    private void showWallPanel(String focusTag) {
+        scanCustomWalls();
+        if (wallPanel == null || wallPanel.getParent() == null) {
+            wallPanel = new FrameLayout(this);
+            wallPanel.setBackgroundColor(0xF2101418);
+            rootView.addView(wallPanel, new FrameLayout.LayoutParams(-1, -1));
+            scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            wiiLayer.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        }
+        wallPanel.removeAllViews();
+        final boolean rotating = wallRotating();
+        final int gen = ++thumbGen;
+        int W = getResources().getDisplayMetrics().widthPixels;
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(56), dp(40), dp(56), dp(48));
+        sv.addView(col, new FrameLayout.LayoutParams(-1, -2));
+        wallPanel.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText("Wallpapers");
+        col.addView(title);
+        TextView sub = text(13, "sans-serif", 0x99FFFFFF);
+        sub.setText(extWalls.length + " of your photos on this TV  \u00B7  " + wallpapers.length + " built in");
+        col.addView(sub, llp(-2, -2, 0, dp(4), 0, dp(22)));
+
+        col.addView(panelLabel("Mode"));
+        LinearLayout modeRow = chipRow();
+        modeRow.addView(chip("Rotating", rotating, "m-rot", () -> {
+            wallPrefs().edit().putString("mode", "rotate").apply();
+            nextWallpaper();
+            showWallPanel("m-rot");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        modeRow.addView(chip("Static", !rotating, "m-static", () -> {
+            android.content.SharedPreferences.Editor ed = wallPrefs().edit().putString("mode", "static");
+            if (wallStaticKey().isEmpty() && !shownKey.isEmpty()) ed.putString("staticKey", shownKey);
+            ed.apply();
+            nextWallpaper();
+            showWallPanel("m-static");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(modeRow, llp(-2, -2, 0, dp(8), 0, dp(20)));
+
+        if (rotating) {
+            col.addView(panelLabel("Change photo every"));
+            LinearLayout dr = chipRow();
+            int cur = wallPrefs().getInt("delayMin", 10);
+            for (int m : new int[]{1, 5, 10, 30, 60}) {
+                final int mm = m;
+                dr.addView(chip(m == 60 ? "1 hour" : m + " min", cur == m, "d-" + m, () -> {
+                    wallPrefs().edit().putInt("delayMin", mm).apply();
+                    scheduleWallpaper(wallIntervalMs());
+                    showWallPanel("d-" + mm);
+                }), llp(-2, dp(38), 0, 0, dp(10), 0));
+            }
+            col.addView(dr, llp(-2, -2, 0, dp(8), 0, dp(6)));
+            TextView note = text(12, "sans-serif", 0x80FFFFFF);
+            note.setText("Rotating through " + wallPool().length + " photos");
+            col.addView(note, llp(-2, -2, 0, 0, 0, dp(20)));
+        }
+
+        col.addView(panelLabel("Idle screen after"));
+        LinearLayout ir = chipRow();
+        int curIdle = idleMinutes();
+        for (int m : new int[]{0, 2, 5, 10, 30}) {
+            final int mm = m;
+            ir.addView(chip(m == 0 ? "Off" : m + " min", curIdle == m, "i-" + m, () -> {
+                wallPrefs().edit().putInt("idleMin", mm).apply();
+                lastInput = SystemClock.elapsedRealtime();
+                showWallPanel("i-" + mm);
+            }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        }
+        col.addView(ir, llp(-2, -2, 0, dp(8), 0, dp(6)));
+        TextView idleNote = text(12, "sans-serif", 0x80FFFFFF);
+        idleNote.setText("When nothing is pressed on the home screen, the apps hide and the wallpaper fills the screen with the time.");
+        col.addView(idleNote, llp(-2, -2, 0, 0, 0, dp(22)));
+
+        if (!rotating) {
+            col.addView(panelLabel("Pick a wallpaper"));
+            final List<String> keys = allWallKeys();
+            final List<ImageView> ivs = new ArrayList<>();
+            String sel = wallStaticKey();
+            int gap = dp(12), perRow = 4;
+            int tw = (W - dp(112) - gap * (perRow - 1)) / perRow;
+            int th = tw * 9 / 16;
+            if (keys.isEmpty()) {
+                TextView none = text(14, "sans-serif", 0xB3FFFFFF);
+                none.setText("No photos found.");
+                col.addView(none, llp(-2, -2, 0, dp(8), 0, 0));
+            }
+            LinearLayout rowL = null;
+            for (int i = 0; i < keys.size(); i++) {
+                if (i % perRow == 0) {
+                    rowL = new LinearLayout(this);
+                    rowL.setOrientation(LinearLayout.HORIZONTAL);
+                    rowL.setClipChildren(false);
+                    col.addView(rowL, llp(-2, -2, 0, i == 0 ? dp(8) : gap, 0, 0));
+                }
+                final String key = keys.get(i);
+                FrameLayout card = new FrameLayout(this);
+                card.setFocusable(true);
+                card.setId(View.generateViewId());
+                card.setTag("t:" + key);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setCornerRadius(dp(10));
+                bg.setColor(0xFF1E252C);
+                card.setBackground(bg);
+                card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+                card.setClipToOutline(true);
+                ImageView iv = new ImageView(this);
+                iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+                ivs.add(iv);
+                if (key.equals(sel)) {
+                    TextView ck = text(15, "sans-serif-medium", Color.WHITE);
+                    ck.setText("\u2713");
+                    ck.setGravity(Gravity.CENTER);
+                    GradientDrawable cb = new GradientDrawable();
+                    cb.setShape(GradientDrawable.OVAL);
+                    cb.setColor(0xFF4FC3F7);
+                    ck.setBackground(cb);
+                    card.addView(ck, lp(dp(26), dp(26), Gravity.TOP | Gravity.END, 0, dp(6), dp(6), 0));
+                }
+                final GradientDrawable ring = new GradientDrawable();
+                ring.setCornerRadius(dp(10));
+                ring.setStroke(dp(3), 0x00000000);
+                card.setForeground(ring);
+                card.setOnFocusChangeListener((v, has) -> {
+                    ring.setStroke(dp(3), has ? 0xFF4FC3F7 : 0x00000000);
+                    v.animate().scaleX(has ? 1.05f : 1f).scaleY(has ? 1.05f : 1f).setDuration(120).start();
+                });
+                card.setOnClickListener(v -> {
+                    wallPrefs().edit().putString("mode", "static").putString("staticKey", key).apply();
+                    nextWallpaper();
+                    showWallPanel("t:" + key);
+                });
+                rowL.addView(card, llp(tw, th, i % perRow == 0 ? 0 : gap, 0, 0, 0));
+            }
+            new Thread(() -> {
+                for (int i = 0; i < keys.size(); i++) {
+                    if (gen != thumbGen) return;
+                    final Bitmap b = decodeThumb(keys.get(i));
+                    final ImageView target = ivs.get(i);
+                    if (b != null) runOnUiThread(() -> { if (gen == thumbGen) target.setImageBitmap(b); });
+                }
+            }).start();
+        }
+
+        TextView done = chip("Done", false, "done", () -> closeWallPanel());
+        col.addView(done, llp(-2, dp(38), 0, dp(26), 0, 0));
+
+        View f = focusTag == null ? null : wallPanel.findViewWithTag(focusTag);
+        if (f == null) f = wallPanel.findViewWithTag(rotating ? "m-rot" : "m-static");
+        if (f != null) f.requestFocus();
+    }
+
+    private void closeWallPanel() {
+        thumbGen++;
+        if (wallPanel != null && wallPanel.getParent() != null) rootView.removeView(wallPanel);
+        applyTheme();
+        View f = wii() ? wiiWallPill : wallPill;
+        if (f != null) f.requestFocus();
+    }
+
+    private void enterIdle() {
+        if (idleOn || rootView == null) return;
+        idleOn = true;
+        if (inputsPopup != null) inputsPopup.dismiss();
+        if (menuPopup != null) menuPopup.dismiss();
+        if (idleLayer == null) {
+            idleLayer = new FrameLayout(this);
+            idleClock = text(72, "sans-serif-thin", Color.WHITE);
+            idleClock.setShadowLayer(dp(14), 0, dp(2), 0xB3000000);
+            idleDate = text(16, "sans-serif-light", 0xE6FFFFFF);
+            idleDate.setShadowLayer(dp(10), 0, dp(1), 0xB3000000);
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setGravity(Gravity.END);
+            box.addView(idleClock);
+            box.addView(idleDate);
+            idleLayer.addView(box, lp(-2, -2, Gravity.BOTTOM | Gravity.END, 0, 0, dp(56), dp(44)));
+        }
+        updateIdleClock();
+        idleLayer.setAlpha(0f);
+        rootView.addView(idleLayer, new FrameLayout.LayoutParams(-1, -1));
+        idleLayer.animate().alpha(1f).setDuration(900).start();
+        for (View v : new View[]{scroll, wiiLayer}) {
+            v.animate().alpha(0f).setDuration(600).withEndAction(() -> { if (idleOn) v.setVisibility(View.INVISIBLE); }).start();
+        }
+        glow.setVisibility(View.INVISIBLE);
+        gridShade.setVisibility(View.INVISIBLE);
+        scrimView.animate().alpha(0f).setDuration(600).start();
+    }
+
+    private void exitIdle() {
+        if (!idleOn) return;
+        idleOn = false;
+        lastInput = SystemClock.elapsedRealtime();
+        if (idleLayer != null && idleLayer.getParent() != null) rootView.removeView(idleLayer);
+        for (View v : new View[]{scroll, wiiLayer}) { v.animate().cancel(); v.setAlpha(1f); }
+        glow.setVisibility(View.VISIBLE);
+        gridShade.setVisibility(View.VISIBLE);
+        scrimView.animate().cancel();
+        scrimView.setAlpha(1f);
+        applyTheme();
+    }
+
+    private void updateIdleClock() {
+        if (idleClock == null) return;
+        Calendar now = Calendar.getInstance();
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(this);
+        idleClock.setText(new SimpleDateFormat(is24 ? "H:mm" : "h:mm", Locale.getDefault()).format(now.getTime()));
+        idleDate.setText(new SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(now.getTime()));
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent ev) {
+        lastInput = SystemClock.elapsedRealtime();
+        if (idleOn) {
+            if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN) exitIdle();
+            return true;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(android.view.MotionEvent ev) {
+        lastInput = SystemClock.elapsedRealtime();
+        if (idleOn) { exitIdle(); return true; }
+        return super.dispatchGenericMotionEvent(ev);
     }
 
     /** Simple pointing-hand cursor drawn from rounded shapes (original artwork). */
