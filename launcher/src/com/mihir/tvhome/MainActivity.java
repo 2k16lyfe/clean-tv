@@ -16,6 +16,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -34,6 +36,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.ViewTreeObserver;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
@@ -427,8 +430,9 @@ public class MainActivity extends Activity {
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
         if (last != null) last.requestFocus();
         else if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
-        allApps = new ArrayList<>(dock);
-        allApps.addAll(rest);
+        List<App> ordered = new ArrayList<>(dock);
+        ordered.addAll(rest);
+        allApps = applyWiiOrder(ordered);
         applyTheme();
     }
 
@@ -671,6 +675,7 @@ public class MainActivity extends Activity {
     }
 
     private void moveBy(int d) {
+        if (wii()) { moveWii(d); return; }
         List<String> l = currentDock();
         int i = l.indexOf(movingPkg), j = i + d;
         if (i < 0 || j < 0 || j >= l.size()) return;
@@ -680,11 +685,82 @@ public class MainActivity extends Activity {
         focusDock(movingPkg);
     }
 
+    /** Wii grid order: the saved order first, anything new after it in the default order. */
+    private List<App> applyWiiOrder(List<App> ordered) {
+        String s = layoutPrefs().getString("wiiorder", null);
+        if (s == null || s.isEmpty()) return ordered;
+        Map<String, App> byPkg = new HashMap<>();
+        for (App a : ordered) byPkg.put(a.pkg, a);
+        List<App> out = new ArrayList<>();
+        for (String p : s.split(",")) {
+            App a = byPkg.remove(p);
+            if (a != null) out.add(a);
+        }
+        for (App a : ordered) if (byPkg.containsKey(a.pkg)) out.add(a);
+        return out;
+    }
+
+    private void moveWii(int d) {
+        int i = -1;
+        for (int k = 0; k < allApps.size(); k++) if (allApps.get(k).pkg.equals(movingPkg)) { i = k; break; }
+        int j = i + d;
+        if (i < 0 || j < 0 || j >= allApps.size()) return;
+        App a = allApps.remove(i);
+        allApps.add(j, a);
+        List<String> l = new ArrayList<>();
+        for (App x : allApps) l.add(x.pkg);
+        layoutPrefs().edit().putString("wiiorder", android.text.TextUtils.join(",", l)).apply();
+        wiiPage = j / 12;
+        buildWiiGrid((j % 12) / 4, j % 4);
+    }
+
+    private void showHiddenApps(View anchor) {
+        PackageManager pm = getPackageManager();
+        Set<String> hid = userHidden();
+        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        Map<String, String> found = new HashMap<>();
+        for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
+            String p = ri.activityInfo.packageName;
+            if (hid.contains(p) && !found.containsKey(p)) found.put(p, String.valueOf(ri.loadLabel(pm)));
+        }
+        if (found.isEmpty()) {
+            android.widget.Toast.makeText(this, "No hidden apps", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<String> pkgs = new ArrayList<>(found.keySet());
+        Collections.sort(pkgs, (x, y) -> found.get(x).compareToIgnoreCase(found.get(y)));
+        List<String> labels = new ArrayList<>();
+        List<Runnable> acts = new ArrayList<>();
+        if (pkgs.size() > 1) {
+            labels.add("Unhide all");
+            acts.add(() -> {
+                Set<String> h = userHidden();
+                h.removeAll(found.keySet());
+                layoutPrefs().edit().putString("hidden", android.text.TextUtils.join(",", h)).apply();
+                buildApps();
+            });
+        }
+        for (String p : pkgs) {
+            labels.add(found.get(p));
+            acts.add(() -> {
+                Set<String> h = userHidden();
+                h.remove(p);
+                layoutPrefs().edit().putString("hidden", android.text.TextUtils.join(",", h)).apply();
+                buildApps();
+            });
+        }
+        showMenuList(anchor, labels, acts);
+    }
+
     private void showAppMenu(View anchor, App app, boolean inDock) {
         List<String> labels = new ArrayList<>();
         List<Runnable> acts = new ArrayList<>();
         if (wii()) {
-            // Wii style is one flat grid, so there is no dock to edit.
+            labels.add("Move");
+            acts.add(() -> {
+                movingPkg = app.pkg;
+                android.widget.Toast.makeText(this, "Use the arrows to move, OK when done", android.widget.Toast.LENGTH_LONG).show();
+            });
         } else if (inDock) {
             labels.add("Move");
             acts.add(() -> {
@@ -704,13 +780,20 @@ public class MainActivity extends Activity {
             layoutPrefs().edit().putString("hidden", android.text.TextUtils.join(",", h)).apply();
             buildApps();
         });
+        if (!userHidden().isEmpty()) {
+            labels.add("Unhide apps\u2026");
+            acts.add(() -> showHiddenApps(anchor));
+        }
         if (!app.system) {
             labels.add("Delete app\u2026");
             acts.add(() -> launch(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg))));
         }
         labels.add("Reset layout");
         acts.add(() -> { layoutPrefs().edit().clear().apply(); buildApps(); });
+        showMenuList(anchor, labels, acts);
+    }
 
+    private void showMenuList(View anchor, List<String> labels, List<Runnable> acts) {
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(8), dp(8), dp(8), dp(8));
@@ -768,6 +851,8 @@ public class MainActivity extends Activity {
     private int wBg1, wBg2, wTile, wEdge, wText, wSub, wBar1, wBar2, wEmptyFill, wEmptyEdge, wBlue;
     private int wiiBuiltTheme = -1;
     private TextView themePill, wiiThemePill;
+    private HandView wiiHand;
+    private boolean wiiHandPlaced;
 
     private String theme() {
         String t = layoutPrefs().getString("theme", "apple");
@@ -908,6 +993,13 @@ public class MainActivity extends Activity {
         tp.leftMargin = (int) (W * 0.08f);
         tp.topMargin = dp(16);
         w.addView(wiiThemePill, tp);
+
+        // Pointing-hand cursor that glides to whatever is focused.
+        wiiHand = new HandView(this);
+        wiiHandPlaced = false;
+        int hh = Math.max(dp(44), Math.min(dp(76), (int) (wiiTh * 0.55f)));
+        wiiHand.setVisibility(View.INVISIBLE);
+        w.addView(wiiHand, new FrameLayout.LayoutParams((int) (hh * 0.85f), hh, Gravity.TOP | Gravity.START));
         return w;
     }
 
@@ -938,7 +1030,7 @@ public class MainActivity extends Activity {
         b.setOnFocusChangeListener((v, has) -> {
             bg.setStroke(dp(3), has ? wBlue : wEdge);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(120).start();
-            if (has) wiiName.setText(name);
+            if (has) { wiiName.setText(name); pointHand(v, 0.5f, 0.6f); }
         });
         return b;
     }
@@ -979,7 +1071,7 @@ public class MainActivity extends Activity {
             ring.setStroke(dp(4), has ? wBlue : 0x00000000);
             v.animate().scaleX(has ? 1.07f : 1f).scaleY(has ? 1.07f : 1f).setDuration(120).start();
             v.setElevation(has ? dp(10) : 0);
-            if (has) wiiName.setText(a.label);
+            if (has) { wiiName.setText(a.label); pointHand(v, 0.5f, 0.62f); }
         });
         card.setOnClickListener(v -> launch(new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
@@ -1031,6 +1123,41 @@ public class MainActivity extends Activity {
         wiiPageText.setText(pages > 1 ? (wiiPage + 1) + " / " + pages : "");
         if (target == null) target = first;
         if (target != null) target.requestFocus();
+    }
+
+    private void whenLaidOut(View v, Runnable r) {
+        if (v.isLaidOut() && v.getWidth() > 0) { r.run(); return; }
+        v.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                if (v.getWidth() == 0) return;
+                ViewTreeObserver o = v.getViewTreeObserver();
+                if (o.isAlive()) o.removeOnGlobalLayoutListener(this);
+                r.run();
+            }
+        });
+    }
+
+    /** Glide the hand so its fingertip lands at (fx, fy) of the focused view. */
+    private void pointHand(View v, float fx, float fy) {
+        final HandView h = wiiHand;
+        if (h == null) return;
+        whenLaidOut(v, () -> {
+            if (h != wiiHand || wiiLayer == null || !v.isAttachedToWindow()) return;
+            int[] a = new int[2], b = new int[2];
+            v.getLocationInWindow(a);
+            wiiLayer.getLocationInWindow(b);
+            float x = a[0] - b[0] + v.getWidth() * fx - h.tipX();
+            float y = a[1] - b[1] + v.getHeight() * fy;
+            if (!wiiHandPlaced) {
+                h.setTranslationX(x);
+                h.setTranslationY(y);
+                h.setVisibility(View.VISIBLE);
+                wiiHandPlaced = true;
+            } else {
+                h.animate().translationX(x).translationY(y).setDuration(180)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+            }
+        });
     }
 
     private void updateWiiClock() {
@@ -1277,6 +1404,8 @@ public class MainActivity extends Activity {
             if (e.getAction() == KeyEvent.ACTION_DOWN) {
                 if (k == KeyEvent.KEYCODE_DPAD_LEFT) moveBy(-1);
                 else if (k == KeyEvent.KEYCODE_DPAD_RIGHT) moveBy(1);
+                else if (wii() && k == KeyEvent.KEYCODE_DPAD_UP) moveBy(-4);
+                else if (wii() && k == KeyEvent.KEYCODE_DPAD_DOWN) moveBy(4);
                 else if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_BACK) {
                     movingPkg = null; swallowKey = k;
                 }
@@ -1289,6 +1418,57 @@ public class MainActivity extends Activity {
             return true;
         }
         return super.dispatchKeyEvent(e);
+    }
+
+    /** Simple pointing-hand cursor drawn from rounded shapes (original artwork). */
+    static final class HandView extends View {
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private final float d;
+
+        HandView(Context c) {
+            super(c);
+            d = c.getResources().getDisplayMetrics().density;
+            fill.setStyle(Paint.Style.FILL);
+            fill.setColor(0xFFFFFFFF);
+            line.setStyle(Paint.Style.STROKE);
+            line.setStrokeWidth(3.2f * d);
+            line.setColor(0xFF8E9BA8);
+            shade.setStyle(Paint.Style.FILL);
+            shade.setColor(0x40000000);
+            setFocusable(false);
+            setClickable(false);
+        }
+
+        /** Horizontal position of the fingertip inside this view. */
+        float tipX() {
+            ViewGroup.LayoutParams lp = getLayoutParams();
+            return (lp != null ? lp.width : getWidth()) * 0.38f;
+        }
+
+        private void shapes(Canvas c, Paint p, float dx, float dy) {
+            float w = getWidth(), h = getHeight();
+            r.set(w * 0.26f + dx, dy, w * 0.50f + dx, h * 0.62f + dy);
+            c.drawRoundRect(r, w * 0.12f, w * 0.12f, p);
+            r.set(w * 0.14f + dx, h * 0.40f + dy, w * 0.88f + dx, h * 0.98f + dy);
+            c.drawRoundRect(r, w * 0.20f, w * 0.20f, p);
+            r.set(w * 0.48f + dx, h * 0.34f + dy, w * 0.66f + dx, h * 0.56f + dy);
+            c.drawRoundRect(r, w * 0.09f, w * 0.09f, p);
+            r.set(w * 0.64f + dx, h * 0.38f + dy, w * 0.82f + dx, h * 0.60f + dy);
+            c.drawRoundRect(r, w * 0.09f, w * 0.09f, p);
+            r.set(w * 0.78f + dx, h * 0.44f + dy, w * 0.94f + dx, h * 0.66f + dy);
+            c.drawRoundRect(r, w * 0.08f, w * 0.08f, p);
+            r.set(dx, h * 0.48f + dy, w * 0.30f + dx, h * 0.78f + dy);
+            c.drawOval(r, p);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            shapes(c, shade, 3 * d, 4 * d);
+            shapes(c, line, 0, 0);
+            shapes(c, fill, 0, 0);
+        }
     }
 
     /** 16:9 container. */
