@@ -21,7 +21,11 @@ can be undone with a script.
 - **Hold OK on an app** to Move, Remove from dock, Hide, Unhide apps, Delete (apps you installed) or Reset layout. In the Wii styles, Move works with all four arrows.
 - **A pointing hand** glides to whichever tile or button is selected in the Wii styles.
 - **One menu for everything.** Double-click `clean-tv.bat` instead of typing the PowerShell commands. The scripts below still work on their own.
+- **Wallpaper settings on the TV.** A **Wallpapers** button opens a clean panel: choose Rotating or Static, pick how often
+  the photo changes (1 minute to 1 hour), or pick one photo from a grid of previews.
 - **Your own wallpapers** pushed from a folder, no rebuild needed.
+- **Idle screen.** After a few minutes with nothing pressed, the apps hide and the wallpaper fills the screen with the time
+  in the corner. Any button brings the apps back. The delay is set in the Wallpapers panel (Off, 2, 5, 10 or 30 minutes).
 - **Undo scripts** for the debloat and for the home screen.
 
 ## Screenshots
@@ -79,6 +83,7 @@ Run from the repo root. Prefix each with `powershell -ExecutionPolicy Bypass -Fi
 | `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png) to the TV. |
 | `.\windows\05-wallpapers.ps1 -Clear` | Goes back to the built-in photos. |
 | `.\windows\06-reset-launcher.ps1` | Resets the launcher to defaults (Apple style, default layout). Fixes a stuck cursor. |
+| `.\windows\07-screensaver.ps1` | Turns off Google TV's own screensaver so the launcher's idle screen is the only one. Add `-On` to undo. |
 
 If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
@@ -86,13 +91,19 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
 - **Theme:** press the **Theme** button (top left in the Wii styles, next to Inputs and Wi-Fi in the Apple style) to cycle Apple, Wii and Wii Dark. The Wii styles are a 4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. They have no dock, so the hold-OK menu there offers Move, Hide, Unhide apps, Delete and Reset layout. The Wii grid keeps its own order, separate from the Apple dock.
-- **Wallpapers:** see `05-wallpapers.ps1`. The Apple style shows them behind the dock; the Wii style uses its own light background.
+- **Wallpapers:** press the **Wallpapers** button (next to Theme). Choose **Rotating** and a delay, or **Static** and tap a preview.
+  Your own photos come from `05-wallpapers.ps1`; the panel shows how many are on the TV. The Apple style shows the wallpaper behind the dock;
+  the Wii styles use their own background but show it on the idle screen.
+- **Idle screen:** set in the Wallpapers panel. Run `07-screensaver.ps1` once so Google TV's own screensaver does not start first.
 
 ## Troubleshooting
 
 - **`adb` not found:** open a new terminal after installing, or use `-AdbPath`.
 - **`failed to authenticate`:** accept the **Allow USB debugging?** prompt on the TV.
 - **Cursor stuck after updating while on a Wii theme:** older builds could start with focus on a hidden tile. Reset the launcher with `adb shell pm clear com.mihir.tvhome` (add `-s <TV_IP>:5555` if adb says more than one device), which returns it to the Apple style. Fixed in newer builds. To be safe on an old build, switch to the Apple theme before installing a new `tvhome.apk`.
+- **Custom wallpapers do not seem to change:** the default is one photo every 10 minutes, and a photo that cannot be read is skipped.
+  Open the **Wallpapers** panel to shorten the delay. If it says 0 of your photos, push them again with `05-wallpapers.ps1`
+  (reinstalling or resetting the launcher removes them). Check with `adb shell ls -l /sdcard/Android/data/com.mihir.tvhome/files/wallpapers`.
 - **`adb: more than one device/emulator`:** add `-s <TV_IP>:5555` to the adb command.
 - **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** the installed launcher was signed with a different key.
   `04-install-launcher.ps1` offers to switch back to the stock home, remove it and reinstall. 
