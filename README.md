@@ -20,7 +20,8 @@ can be undone with a script.
 - **Three looks.** The Apple TV-style dock, a light Wii-inspired grid of channel tiles with pages and a bottom bar, or a dark version of that grid (original artwork only, not affiliated with Nintendo). Switch any time with the Theme button.
 - **Hold OK on an app** to Move, Remove from dock, Hide, Unhide apps, Delete (apps you installed) or Reset layout. In the Wii styles, Move works with all four arrows.
 - **A pointing hand** glides to whichever tile or button is selected in the Wii styles.
-- **One menu for everything.** Double-click `clean-tv.bat` instead of typing the PowerShell commands. The scripts below still work on their own.
+- **One menu for everything.** Double-click `clean-tv.bat` instead of typing the PowerShell commands. It remembers your TVs, so
+  you pick one by number instead of retyping its IP. The scripts below still work on their own.
 - **Wallpaper settings on the TV.** A **Wallpapers** button opens a clean panel: choose Rotating or Static, pick how often
   the photo changes (1 minute to 1 hour), or pick one photo from a grid of previews.
 - **Your own wallpapers** pushed from a folder, no rebuild needed. Animated **GIFs** work too.
@@ -51,7 +52,8 @@ TV, run `-DryRun` first and edit the `$Groups` list at the top of `02-debloat.ps
 2. **Get the launcher APK.** Download `tvhome.apk` from this repo's **Releases** page.
 3. Clone or download this repo. Put `tvhome.apk` in the repo's root folder and open Command Prompt there.
    You can run steps 4 to 6 as commands, or double-click `clean-tv.bat` for a menu. In the menu, press **T**
-   and type your TV's IP (like `192.168.1.50`) first, then pick the number shown under each step.
+   and add your TV's IP (like `192.168.1.50`) with a name. It is saved, so next time **T** lists your TVs and you pick one by number.
+   Then pick the number shown under each step.
 4. Back up the TV (read-only):
    ```
    powershell -ExecutionPolicy Bypass -File .\windows\01-backup.ps1 -TvIp 192.168.1.50
@@ -123,6 +125,7 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 - Use at your own risk. This is not affiliated with Google, Walmart/onn, Nintendo or any TV maker.
 - Your `backups/` folder contains device identifiers and copies of installed APKs. It is git-ignored; never publish it.
+  The same goes for `tv-devices.json` (the TVs the menu remembers), `last_tv.txt` and `last_backup.txt`, which hold your TV's address.
 - The scripts only run `pm disable-user`, `pm enable`, `adb install`, and `adb uninstall` of the launcher itself.
   The Delete option in the launcher uses Android's own uninstall dialog.
 
