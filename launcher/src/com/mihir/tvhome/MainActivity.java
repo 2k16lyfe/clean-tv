@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
         tf.addAction(Intent.ACTION_TIME_CHANGED);
         tf.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         tf.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+        tf.addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION);
         registerReceiver(tick, tf);
         updateClock();
         updateWifi();
@@ -177,6 +178,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         // Home pressed while already home: jump back to the first dock app.
         if (inputsPopup != null) inputsPopup.dismiss();
+        if (wii()) { wiiPage = 0; buildWiiGrid(0, 0); return; }
         if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
         scroll.smoothScrollTo(0, 0);
     }
@@ -278,6 +280,8 @@ public class MainActivity extends Activity {
         grid.setClipChildren(false);
         grid.setClipToPadding(false);
         content.addView(grid, llp(-1, -2, dp(68), 0, dp(68), dp(160)));
+        wiiLayer = buildWii();
+        root.addView(wiiLayer, new FrameLayout.LayoutParams(-1, -1));
         return root;
     }
 
@@ -416,6 +420,9 @@ public class MainActivity extends Activity {
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
         if (last != null) last.requestFocus();
         else if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
+        allApps = new ArrayList<>(dock);
+        allApps.addAll(rest);
+        applyTheme();
     }
 
     /** A 16:9 card with the app's banner; the name shows under it while focused. */
@@ -669,7 +676,9 @@ public class MainActivity extends Activity {
     private void showAppMenu(View anchor, App app, boolean inDock) {
         List<String> labels = new ArrayList<>();
         List<Runnable> acts = new ArrayList<>();
-        if (inDock) {
+        if (wii()) {
+            // Wii style is one flat grid, so there is no dock to edit.
+        } else if (inDock) {
             labels.add("Move");
             acts.add(() -> {
                 movingPkg = app.pkg;
@@ -692,6 +701,8 @@ public class MainActivity extends Activity {
             labels.add("Delete app\u2026");
             acts.add(() -> launch(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg))));
         }
+        labels.add(wii() ? "Switch to Apple style" : "Switch to Wii style");
+        acts.add(() -> { layoutPrefs().edit().putString("theme", wii() ? "apple" : "wii").apply(); applyTheme(); });
         labels.add("Reset layout");
         acts.add(() -> { layoutPrefs().edit().clear().apply(); buildApps(); });
 
@@ -741,9 +752,242 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---------------------------------------------------------------- Wii-inspired theme
+    // Light, glossy channel grid with a bottom bar. Original artwork only, nothing from Nintendo.
+
+    private FrameLayout wiiLayer;
+    private LinearLayout wiiGrid;
+    private TextView wiiName, wiiPageText, wiiLeft, wiiRight, wiiClock, wiiDate, wiiWifi;
+    private int wiiTw, wiiTh, wiiGap, wiiPage = 0;
+    private List<App> allApps = new ArrayList<>();
+    private static final int WII_BLUE = 0xFF36A9E1, WII_EDGE = 0xFFC9D2DC, WII_TEXT = 0xFF5B6670;
+
+    private boolean wii() { return "wii".equals(layoutPrefs().getString("theme", "apple")); }
+
+    private void applyTheme() {
+        if (wiiLayer == null) return;
+        boolean w = wii();
+        wiiLayer.setVisibility(w ? View.VISIBLE : View.GONE);
+        scroll.setVisibility(w ? View.GONE : View.VISIBLE);
+        if (w) {
+            buildWiiGrid(0, 0);
+            updateWiiClock();
+            updateWifi();
+        } else {
+            View f = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
+            if (f != null) f.requestFocus();
+            else if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
+        }
+    }
+
+    private FrameLayout buildWii() {
+        int W = getResources().getDisplayMetrics().widthPixels, H = getResources().getDisplayMetrics().heightPixels;
+        wiiGap = dp(12);
+        int byWidth = (int) ((W * 0.78f - 3 * wiiGap) / 4);
+        int byHeight = (int) (((H * 0.60f - 2 * wiiGap) / 3) / 0.5625f);
+        wiiTw = Math.min(byWidth, byHeight);
+        wiiTh = (int) (wiiTw * 0.5625f);
+        int gridW = 4 * wiiTw + 3 * wiiGap, gridH = 3 * wiiTh + 2 * wiiGap;
+        int top = (int) (H * 0.07f), barH = (int) (H * 0.17f);
+
+        FrameLayout w = new FrameLayout(this);
+        w.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFFFFFFF, 0xFFE6EBF0}));
+        w.setClipChildren(false);
+
+        wiiGrid = new LinearLayout(this);
+        wiiGrid.setOrientation(LinearLayout.VERTICAL);
+        wiiGrid.setClipChildren(false);
+        FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(gridW, gridH, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        gp.topMargin = top;
+        w.addView(wiiGrid, gp);
+
+        wiiName = text(18, "sans-serif-medium", WII_TEXT);
+        wiiName.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        np.topMargin = top + gridH + dp(16);
+        w.addView(wiiName, np);
+
+        wiiLeft = wiiArrow("\u2039");
+        wiiRight = wiiArrow("\u203A");
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START | Gravity.TOP);
+        lp.leftMargin = Math.max(dp(8), (W - gridW) / 4 - dp(24));
+        lp.topMargin = top + gridH / 2 - dp(24);
+        w.addView(wiiLeft, lp);
+        FrameLayout.LayoutParams rp = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END | Gravity.TOP);
+        rp.rightMargin = lp.leftMargin;
+        rp.topMargin = lp.topMargin;
+        w.addView(wiiRight, rp);
+
+        View bar = new View(this);
+        GradientDrawable bb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFF7F9FB, 0xFFDCE3EA});
+        bb.setStroke(dp(2), WII_EDGE);
+        bar.setBackground(bb);
+        w.addView(bar, new FrameLayout.LayoutParams(-1, barH, Gravity.BOTTOM));
+
+        wiiPageText = text(12, "sans-serif-medium", 0xFF8A949E);
+        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        pp.bottomMargin = barH + dp(6);
+        w.addView(wiiPageText, pp);
+
+        LinearLayout mid = new LinearLayout(this);
+        mid.setOrientation(LinearLayout.VERTICAL);
+        mid.setGravity(Gravity.CENTER);
+        wiiClock = text(40, "sans-serif-light", WII_TEXT);
+        wiiDate = text(13, "sans-serif-medium", 0xFF8A949E);
+        mid.addView(wiiClock);
+        mid.addView(wiiDate);
+        w.addView(mid, new FrameLayout.LayoutParams(dp(360), barH, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+
+        TextView settings = wiiButton("\u2699", "Settings", true);
+        settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
+        FrameLayout.LayoutParams sbp = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.BOTTOM | Gravity.START);
+        sbp.leftMargin = (int) (W * 0.08f);
+        sbp.bottomMargin = (barH - dp(64)) / 2;
+        w.addView(settings, sbp);
+
+        wiiWifi = wiiButton("\u25C9  Wi-Fi", "Wi-Fi", false);
+        wiiWifi.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        FrameLayout.LayoutParams wbp = new FrameLayout.LayoutParams(-2, dp(48), Gravity.BOTTOM | Gravity.END);
+        wbp.rightMargin = (int) (W * 0.08f);
+        wbp.bottomMargin = (barH - dp(48)) / 2;
+        w.addView(wiiWifi, wbp);
+        return w;
+    }
+
+    private TextView wiiArrow(String glyph) {
+        TextView t = text(34, "sans-serif-light", WII_TEXT);
+        t.setText(glyph);
+        t.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(Color.WHITE);
+        bg.setStroke(dp(2), WII_EDGE);
+        t.setBackground(bg);
+        return t;
+    }
+
+    private TextView wiiButton(String label, String name, boolean circle) {
+        TextView b = text(circle ? 26 : 14, "sans-serif-medium", WII_TEXT);
+        b.setText(label);
+        b.setGravity(Gravity.CENTER);
+        if (!circle) b.setPadding(dp(20), 0, dp(20), 0);
+        b.setFocusable(true);
+        b.setId(View.generateViewId());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(circle ? 32 : 24));
+        bg.setColor(Color.WHITE);
+        bg.setStroke(dp(3), WII_EDGE);
+        b.setBackground(bg);
+        b.setOnFocusChangeListener((v, has) -> {
+            bg.setStroke(dp(3), has ? WII_BLUE : WII_EDGE);
+            v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(120).start();
+            if (has) wiiName.setText(name);
+        });
+        return b;
+    }
+
+    private View wiiEmpty() {
+        View v = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(14));
+        g.setColor(0xFFF1F4F7);
+        g.setStroke(dp(2), 0xFFE0E6EC);
+        v.setBackground(g);
+        return v;
+    }
+
+    private View wiiTile(App a, int row, int col) {
+        FrameLayout card = new FrameLayout(this);
+        card.setFocusable(true);
+        card.setId(View.generateViewId());
+        card.setTag(a);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(14));
+        bg.setColor(Color.WHITE);
+        bg.setStroke(dp(2), WII_EDGE);
+        card.setBackground(bg);
+        card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        card.setClipToOutline(true);
+        ImageView iv = new ImageView(this);
+        Drawable.ConstantState cs = a.art.getConstantState();
+        iv.setImageDrawable(cs != null ? cs.newDrawable(getResources()).mutate() : a.art);
+        iv.setScaleType(a.isBanner ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+        if (!a.isBanner) iv.setPadding(dp(18), dp(10), dp(18), dp(10));
+        card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        GradientDrawable ring = new GradientDrawable();
+        ring.setCornerRadius(dp(14));
+        ring.setStroke(dp(4), 0x00000000);
+        card.setForeground(ring);
+        card.setOnFocusChangeListener((v, has) -> {
+            ring.setStroke(dp(4), has ? WII_BLUE : 0x00000000);
+            v.animate().scaleX(has ? 1.07f : 1f).scaleY(has ? 1.07f : 1f).setDuration(120).start();
+            v.setElevation(has ? dp(10) : 0);
+            if (has) wiiName.setText(a.label);
+        });
+        card.setOnClickListener(v -> launch(new Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                .setComponent(a.component)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)));
+        card.setOnLongClickListener(v -> { showAppMenu(card, a, false); return true; });
+        card.setOnKeyListener((v, k, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int pages = Math.max(1, (allApps.size() + 11) / 12);
+            if (k == KeyEvent.KEYCODE_DPAD_LEFT && col == 0) {
+                if (wiiPage > 0) { wiiPage--; buildWiiGrid(row, 3); }
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_DPAD_RIGHT && col == 3) {
+                if (wiiPage < pages - 1) { wiiPage++; buildWiiGrid(row, 0); }
+                return true;
+            }
+            return false;
+        });
+        return card;
+    }
+
+    private void buildWiiGrid(int fr, int fc) {
+        if (wiiGrid == null) return;
+        wiiGrid.removeAllViews();
+        int per = 12, pages = Math.max(1, (allApps.size() + per - 1) / per);
+        if (wiiPage >= pages) wiiPage = pages - 1;
+        View target = null, first = null;
+        for (int r = 0; r < 3; r++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setClipChildren(false);
+            for (int c = 0; c < 4; c++) {
+                int idx = wiiPage * per + r * 4 + c;
+                View v;
+                if (idx < allApps.size()) {
+                    v = wiiTile(allApps.get(idx), r, c);
+                    if (first == null) first = v;
+                    if (r == fr && c == fc) target = v;
+                } else {
+                    v = wiiEmpty();
+                }
+                line.addView(v, llp(wiiTw, wiiTh, c == 0 ? 0 : wiiGap, 0, 0, 0));
+            }
+            wiiGrid.addView(line, llp(-2, wiiTh, 0, r == 0 ? 0 : wiiGap, 0, 0));
+        }
+        wiiLeft.setAlpha(wiiPage > 0 ? 1f : 0.25f);
+        wiiRight.setAlpha(wiiPage < pages - 1 ? 1f : 0.25f);
+        wiiPageText.setText(pages > 1 ? (wiiPage + 1) + " / " + pages : "");
+        if (target == null) target = first;
+        if (target != null) target.requestFocus();
+    }
+
+    private void updateWiiClock() {
+        if (wiiClock == null) return;
+        Calendar now = Calendar.getInstance();
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(this);
+        wiiClock.setText(new SimpleDateFormat(is24 ? "H:mm" : "h:mm a", Locale.getDefault()).format(now.getTime()));
+        wiiDate.setText(new SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(now.getTime()));
+    }
+
     // ---------------------------------------------------------------- status
 
     private void updateClock() {
+        updateWiiClock();
         Calendar now = Calendar.getInstance();
         int h = now.get(Calendar.HOUR_OF_DAY);
         greeting.setText(h < 5 ? "GOOD NIGHT" : h < 12 ? "GOOD MORNING" : h < 17 ? "GOOD AFTERNOON" : "GOOD EVENING");
@@ -754,16 +998,26 @@ public class MainActivity extends Activity {
     }
 
     private void updateWifi() {
-        String name = "Wi-Fi";
+        String name = "Offline";
         try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-            if (wm != null && wm.getConnectionInfo() != null) {
-                String s = wm.getConnectionInfo().getSSID();
-                if (s != null && !s.contains("unknown ssid")) name = s.replace("\"", "");
-                if (wm.getConnectionInfo().getNetworkId() == -1) name = "Offline";
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            android.net.Network net = cm == null ? null : cm.getActiveNetwork();
+            android.net.NetworkCapabilities nc = net == null ? null : cm.getNetworkCapabilities(net);
+            if (nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                if (nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) {
+                    name = "Ethernet";
+                } else {
+                    name = "Wi-Fi";
+                    WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                    if (wm != null && wm.getConnectionInfo() != null) {
+                        String s = wm.getConnectionInfo().getSSID();
+                        if (s != null && !s.contains("unknown ssid")) name = s.replace("\"", "");
+                    }
+                }
             }
         } catch (SecurityException ignored) { }
-        wifiPill.setText("◉  " + name);
+        wifiPill.setText("\u25C9  " + name);
+        if (wiiWifi != null) wiiWifi.setText(wifiPill.getText());
     }
 
     // ---------------------------------------------------------------- glow
