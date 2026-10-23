@@ -1,6 +1,6 @@
 # 05-wallpapers.ps1  (version 2)
 # Sends your own photos to the TV launcher as wallpapers, no rebuild needed.
-#   Put 1920x1080 .jpg/.png files in a folder called wallpapers (next to this script), then:
+#   Put 1920x1080 .jpg/.png files (or animated .gif) in a folder called wallpapers (next to this script), then:
 #   powershell -ExecutionPolicy Bypass -File .\05-wallpapers.ps1
 #   Go back to the built-in nature photos:  add -Clear
 param([string]$AdbPath = "", [string]$Folder = ".\wallpapers", [switch]$Clear, [string]$TvIp = "", [int]$Port = 5555)
@@ -25,10 +25,10 @@ if ($Clear) {
     & adb -s $serial shell "rm -f $dest/*" | Out-Null
     Write-Host "Cleared. The launcher will use its built-in photos." -ForegroundColor Green
 } else {
-    $files = Get-ChildItem $Folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.(jpg|jpeg|png|webp)$" }
+    $files = Get-ChildItem $Folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.(jpg|jpeg|png|webp|gif)$" }
     if (-not $files) { Fail "No images found in $Folder" }
     & adb -s $serial shell "rm -f $dest/*" | Out-Null
-    foreach ($f in $files) { Write-Host "  pushing $($f.Name)"; & adb -s $serial push $f.FullName "$dest/$($f.Name)" | Out-Null }
+    foreach ($f in $files) { Write-Host "  pushing $($f.Name)"; if ($f.Extension -eq ".gif" -and $f.Length -gt 15MB) { Write-Host "    (large GIF: it may stutter on a small TV box. Under 15 MB and 1080p or smaller is best)" -ForegroundColor Yellow }; & adb -s $serial push $f.FullName "$dest/$($f.Name)" | Out-Null }
     Write-Host "Pushed $($files.Count) photo(s)." -ForegroundColor Green
 }
 & adb -s $serial shell "am force-stop com.mihir.tvhome" | Out-Null
