@@ -317,13 +317,15 @@ public class MainActivity extends Activity {
         LinearLayout right = new LinearLayout(this);
         right.setGravity(Gravity.CENTER_VERTICAL);
         right.setClipChildren(false);
+        themePill = pill("Apple", "\u25D0");
+        themePill.setOnClickListener(v -> cycleTheme());
         TextView inputs = pill("Inputs", "⇥");
         inputs.setOnClickListener(v -> showInputs(v));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{themePill, inputs, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }
@@ -701,8 +703,6 @@ public class MainActivity extends Activity {
             labels.add("Delete app\u2026");
             acts.add(() -> launch(new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + app.pkg))));
         }
-        labels.add(wii() ? "Switch to Apple style" : "Switch to Wii style");
-        acts.add(() -> { layoutPrefs().edit().putString("theme", wii() ? "apple" : "wii").apply(); applyTheme(); });
         labels.add("Reset layout");
         acts.add(() -> { layoutPrefs().edit().clear().apply(); buildApps(); });
 
@@ -760,15 +760,50 @@ public class MainActivity extends Activity {
     private TextView wiiName, wiiPageText, wiiLeft, wiiRight, wiiClock, wiiDate, wiiWifi;
     private int wiiTw, wiiTh, wiiGap, wiiPage = 0;
     private List<App> allApps = new ArrayList<>();
-    private static final int WII_BLUE = 0xFF36A9E1, WII_EDGE = 0xFFC9D2DC, WII_TEXT = 0xFF5B6670;
+    private int wBg1, wBg2, wTile, wEdge, wText, wSub, wBar1, wBar2, wEmptyFill, wEmptyEdge, wBlue;
+    private int wiiBuiltTheme = -1;
+    private TextView themePill, wiiThemePill;
 
-    private boolean wii() { return "wii".equals(layoutPrefs().getString("theme", "apple")); }
+    private String theme() {
+        String t = layoutPrefs().getString("theme", "apple");
+        return ("wii".equals(t) || "wiidark".equals(t)) ? t : "apple";
+    }
+
+    private boolean wii() { return !"apple".equals(theme()); }
+
+    private boolean wiiDark() { return "wiidark".equals(theme()); }
+
+    /** One button cycles Apple -> Wii -> Wii Dark -> Apple. */
+    private void cycleTheme() {
+        String t = theme();
+        String next = "apple".equals(t) ? "wii" : "wii".equals(t) ? "wiidark" : "apple";
+        layoutPrefs().edit().putString("theme", next).apply();
+        applyTheme();
+        View f = wii() ? wiiThemePill : themePill;
+        if (f != null) f.requestFocus();
+    }
+
+    private void updateThemePills() {
+        String label = "wiidark".equals(theme()) ? "Wii Dark" : "wii".equals(theme()) ? "Wii" : "Apple";
+        if (themePill != null) themePill.setText("\u25D0  " + label);
+        if (wiiThemePill != null) wiiThemePill.setText("\u25D0  " + label);
+    }
+
+    private void rebuildWii() {
+        ViewGroup parent = (ViewGroup) wiiLayer.getParent();
+        int idx = parent.indexOfChild(wiiLayer);
+        parent.removeView(wiiLayer);
+        wiiLayer = buildWii();
+        parent.addView(wiiLayer, idx, new FrameLayout.LayoutParams(-1, -1));
+    }
 
     private void applyTheme() {
         if (wiiLayer == null) return;
         boolean w = wii();
         wiiLayer.setVisibility(w ? View.VISIBLE : View.GONE);
         scroll.setVisibility(w ? View.GONE : View.VISIBLE);
+        if (w && wiiBuiltTheme != (wiiDark() ? 1 : 0)) rebuildWii();
+        updateThemePills();
         if (w) {
             buildWiiGrid(0, 0);
             updateWiiClock();
@@ -782,16 +817,24 @@ public class MainActivity extends Activity {
 
     private FrameLayout buildWii() {
         int W = getResources().getDisplayMetrics().widthPixels, H = getResources().getDisplayMetrics().heightPixels;
+        boolean d = wiiDark();
+        wiiBuiltTheme = d ? 1 : 0;
+        wBg1 = d ? 0xFF1B2430 : 0xFFFFFFFF;  wBg2 = d ? 0xFF0D131A : 0xFFE6EBF0;
+        wTile = d ? 0xFF263140 : 0xFFFFFFFF; wEdge = d ? 0xFF3A4757 : 0xFFC9D2DC;
+        wText = d ? 0xFFD5DEE8 : 0xFF5B6670; wSub = d ? 0xFF8C99A8 : wSub;
+        wBar1 = d ? 0xFF222D3A : 0xFFF7F9FB; wBar2 = d ? 0xFF141B24 : 0xFFDCE3EA;
+        wEmptyFill = d ? 0xFF1C2531 : 0xFFF1F4F7; wEmptyEdge = d ? 0xFF2B3644 : 0xFFE0E6EC;
+        wBlue = d ? 0xFF4FC3F7 : 0xFF36A9E1;
         wiiGap = dp(12);
         int byWidth = (int) ((W * 0.78f - 3 * wiiGap) / 4);
         int byHeight = (int) (((H * 0.60f - 2 * wiiGap) / 3) / 0.5625f);
         wiiTw = Math.min(byWidth, byHeight);
         wiiTh = (int) (wiiTw * 0.5625f);
         int gridW = 4 * wiiTw + 3 * wiiGap, gridH = 3 * wiiTh + 2 * wiiGap;
-        int top = (int) (H * 0.07f), barH = (int) (H * 0.17f);
+        int top = (int) (H * 0.12f), barH = (int) (H * 0.17f);
 
         FrameLayout w = new FrameLayout(this);
-        w.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFFFFFFF, 0xFFE6EBF0}));
+        w.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{wBg1, wBg2}));
         w.setClipChildren(false);
 
         wiiGrid = new LinearLayout(this);
@@ -801,7 +844,7 @@ public class MainActivity extends Activity {
         gp.topMargin = top;
         w.addView(wiiGrid, gp);
 
-        wiiName = text(18, "sans-serif-medium", WII_TEXT);
+        wiiName = text(18, "sans-serif-medium", wText);
         wiiName.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         np.topMargin = top + gridH + dp(16);
@@ -819,12 +862,12 @@ public class MainActivity extends Activity {
         w.addView(wiiRight, rp);
 
         View bar = new View(this);
-        GradientDrawable bb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFF7F9FB, 0xFFDCE3EA});
-        bb.setStroke(dp(2), WII_EDGE);
+        GradientDrawable bb = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{wBar1, wBar2});
+        bb.setStroke(dp(2), wEdge);
         bar.setBackground(bb);
         w.addView(bar, new FrameLayout.LayoutParams(-1, barH, Gravity.BOTTOM));
 
-        wiiPageText = text(12, "sans-serif-medium", 0xFF8A949E);
+        wiiPageText = text(12, "sans-serif-medium", wSub);
         FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         pp.bottomMargin = barH + dp(6);
         w.addView(wiiPageText, pp);
@@ -832,8 +875,8 @@ public class MainActivity extends Activity {
         LinearLayout mid = new LinearLayout(this);
         mid.setOrientation(LinearLayout.VERTICAL);
         mid.setGravity(Gravity.CENTER);
-        wiiClock = text(40, "sans-serif-light", WII_TEXT);
-        wiiDate = text(13, "sans-serif-medium", 0xFF8A949E);
+        wiiClock = text(40, "sans-serif-light", wText);
+        wiiDate = text(13, "sans-serif-medium", wSub);
         mid.addView(wiiClock);
         mid.addView(wiiDate);
         w.addView(mid, new FrameLayout.LayoutParams(dp(360), barH, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
@@ -851,23 +894,29 @@ public class MainActivity extends Activity {
         wbp.rightMargin = (int) (W * 0.08f);
         wbp.bottomMargin = (barH - dp(48)) / 2;
         w.addView(wiiWifi, wbp);
+        wiiThemePill = wiiButton("\u25D0  Theme", "Change theme", false);
+        wiiThemePill.setOnClickListener(v -> cycleTheme());
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-2, dp(38), Gravity.TOP | Gravity.START);
+        tp.leftMargin = (int) (W * 0.08f);
+        tp.topMargin = dp(16);
+        w.addView(wiiThemePill, tp);
         return w;
     }
 
     private TextView wiiArrow(String glyph) {
-        TextView t = text(34, "sans-serif-light", WII_TEXT);
+        TextView t = text(34, "sans-serif-light", wText);
         t.setText(glyph);
         t.setGravity(Gravity.CENTER);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(Color.WHITE);
-        bg.setStroke(dp(2), WII_EDGE);
+        bg.setColor(wTile);
+        bg.setStroke(dp(2), wEdge);
         t.setBackground(bg);
         return t;
     }
 
     private TextView wiiButton(String label, String name, boolean circle) {
-        TextView b = text(circle ? 26 : 14, "sans-serif-medium", WII_TEXT);
+        TextView b = text(circle ? 26 : 14, "sans-serif-medium", wText);
         b.setText(label);
         b.setGravity(Gravity.CENTER);
         if (!circle) b.setPadding(dp(20), 0, dp(20), 0);
@@ -875,11 +924,11 @@ public class MainActivity extends Activity {
         b.setId(View.generateViewId());
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(circle ? 32 : 24));
-        bg.setColor(Color.WHITE);
-        bg.setStroke(dp(3), WII_EDGE);
+        bg.setColor(wTile);
+        bg.setStroke(dp(3), wEdge);
         b.setBackground(bg);
         b.setOnFocusChangeListener((v, has) -> {
-            bg.setStroke(dp(3), has ? WII_BLUE : WII_EDGE);
+            bg.setStroke(dp(3), has ? wBlue : wEdge);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(120).start();
             if (has) wiiName.setText(name);
         });
@@ -890,8 +939,8 @@ public class MainActivity extends Activity {
         View v = new View(this);
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(14));
-        g.setColor(0xFFF1F4F7);
-        g.setStroke(dp(2), 0xFFE0E6EC);
+        g.setColor(wEmptyFill);
+        g.setStroke(dp(2), wEmptyEdge);
         v.setBackground(g);
         return v;
     }
@@ -903,8 +952,8 @@ public class MainActivity extends Activity {
         card.setTag(a);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(14));
-        bg.setColor(Color.WHITE);
-        bg.setStroke(dp(2), WII_EDGE);
+        bg.setColor(wTile);
+        bg.setStroke(dp(2), wEdge);
         card.setBackground(bg);
         card.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
         card.setClipToOutline(true);
@@ -919,7 +968,7 @@ public class MainActivity extends Activity {
         ring.setStroke(dp(4), 0x00000000);
         card.setForeground(ring);
         card.setOnFocusChangeListener((v, has) -> {
-            ring.setStroke(dp(4), has ? WII_BLUE : 0x00000000);
+            ring.setStroke(dp(4), has ? wBlue : 0x00000000);
             v.animate().scaleX(has ? 1.07f : 1f).scaleY(has ? 1.07f : 1f).setDuration(120).start();
             v.setElevation(has ? dp(10) : 0);
             if (has) wiiName.setText(a.label);
