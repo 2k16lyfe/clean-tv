@@ -1,14 +1,15 @@
 # clean-tv (Windows edition)
 
 Clean up a slow, ad-filled Android TV / Google TV box from a **Windows PC**, then give it a fast,
-minimal **Apple TV-style home screen**: a dock of your favourite apps over rotating nature wallpapers.
+minimal **Apple TV-style home screen**: a dock of your favourite apps over rotating nature wallpapers,
+or an optional light, **Wii-inspired** channel grid.
 
 Everything runs over Wi-Fi with `adb`. Packages are **disabled, never uninstalled**, so every change
 can be undone with a script.
 
 > Based on [mihirgupta0900/tv-home](https://github.com/mihirgupta0900/tv-home) (MIT), which targets
 > macOS and Claude Code. This edition adds PowerShell scripts for Windows, a hold-to-edit app menu,
-> and custom wallpapers without rebuilding.
+> a Wii-inspired theme, and custom wallpapers without rebuilding.
 
 ## What you get
 
@@ -16,6 +17,8 @@ can be undone with a script.
 - **Debloat with prompts.** Disables ad-tech, feedback services and streaming apps you don't use, one
   group at a time, with a screenshot check after each. A protected list covers voice, remote, Bluetooth and Play services.
 - **A tiny launcher.** Dock, app grid, clock, crossfading wallpapers. No ads, no recommendations, no network use for content.
+- **Two looks.** The Apple TV-style dock, or a light Wii-inspired grid of channel tiles with pages and a bottom bar
+  (original artwork only, not affiliated with Nintendo). Switch any time from the hold-OK menu.
 - **Hold OK on an app** to Move, Remove from dock, Hide, Delete (apps you installed) or Reset layout.
 - **Your own wallpapers** pushed from a folder, no rebuild needed.
 - **Undo scripts** for the debloat and for the home screen.
@@ -74,7 +77,10 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 ## Customise
 
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
-- **Wallpapers:** see `05-wallpapers.ps1`. 
+- **Theme:** hold OK on any app and choose **Switch to Wii style** or **Switch to Apple style**. Wii style is a
+  4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. It has
+  no dock, so the hold-OK menu there offers Hide, Delete, the theme switch and Reset layout.
+- **Wallpapers:** see `05-wallpapers.ps1`. The Apple style shows them behind the dock; the Wii style uses its own light background.
 
 ## Troubleshooting
 
@@ -85,10 +91,14 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **Home button misbehaves:** run `04-install-launcher.ps1 -Revert`. On Google TV the setup app
   (`com.google.android.tungsten.setupwraith`) can hijack Home, which is why the script disables it with the stock launcher.
 - **Wi-Fi forgot its password after the swap:** it happened once on the tested box. Re-enter it.
+- **The Wi-Fi label shows "Wi-Fi" instead of your network name:** Android only shares the network name with apps that
+  have location access. `04-install-launcher.ps1` grants it automatically. If you installed the APK another way, run
+  `adb shell pm grant com.mihir.tvhome android.permission.ACCESS_FINE_LOCATION`, and make sure the TV's location
+  setting is on. The label shows "Offline" only when the TV has no connection.
 
 ## Safety
 
-- Use at your own risk. This is not affiliated with Google, Walmart/onn or any TV maker.
+- Use at your own risk. This is not affiliated with Google, Walmart/onn, Nintendo or any TV maker.
 - Your `backups/` folder contains device identifiers and copies of installed APKs. It is git-ignored; never publish it.
 - The scripts only run `pm disable-user`, `pm enable`, `adb install`, and `adb uninstall` of the launcher itself.
   The Delete option in the launcher uses Android's own uninstall dialog.
@@ -98,4 +108,4 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - Launcher and original tooling: [Mihir Gupta](https://github.com/mihirgupta0900/tv-home), MIT.
 - Windows scripts and launcher changes: this repo's contributors, MIT. See [LICENSE](LICENSE).
 - Wallpapers are from Wikimedia Commons under CC BY-SA. Attribution is in
-  [`launcher/WALLPAPER-CREDITS.md`](launcher/WALLPAPER-CREDITS.md). 
+  [`launcher/WALLPAPER-CREDITS.md`](launcher/WALLPAPER-CREDITS.md).
