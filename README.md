@@ -18,7 +18,9 @@ can be undone with a script.
   group at a time, with a screenshot check after each. A protected list covers voice, remote, Bluetooth and Play services.
 - **A tiny launcher.** Dock, app grid, clock, crossfading wallpapers. No ads, no recommendations, no network use for content.
 - **Three looks.** The Apple TV-style dock, a light Wii-inspired grid of channel tiles with pages and a bottom bar, or a dark version of that grid (original artwork only, not affiliated with Nintendo). Switch any time with the Theme button.
-- **Hold OK on an app** to Move, Remove from dock, Hide, Delete (apps you installed) or Reset layout.
+- **Hold OK on an app** to Move, Remove from dock, Hide, Unhide apps, Delete (apps you installed) or Reset layout. In the Wii styles, Move works with all four arrows.
+- **A pointing hand** glides to whichever tile or button is selected in the Wii styles.
+- **One menu for everything.** Double-click `clean-tv.bat` instead of typing the PowerShell commands. The scripts below still work on their own.
 - **Your own wallpapers** pushed from a folder, no rebuild needed.
 - **Undo scripts** for the debloat and for the home screen.
 
@@ -70,13 +72,14 @@ Run from the repo root. Prefix each with `powershell -ExecutionPolicy Bypass -Fi
 | `.\windows\04-install-launcher.ps1 -Revert` | Goes back to the stock home screen. |
 | `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png) to the TV. |
 | `.\windows\05-wallpapers.ps1 -Clear` | Goes back to the built-in photos. |
+| `.\windows\06-reset-launcher.ps1` | Resets the launcher to defaults (Apple style, default layout). Fixes a stuck cursor. |
 
 If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 ## Customise
 
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
-- **Theme:** press the **Theme** button (top left in the Wii styles, next to Inputs and Wi-Fi in the Apple style) to cycle Apple, Wii and Wii Dark. The Wii styles are a 4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. They have no dock, so the hold-OK menu there offers Hide, Delete and Reset layout.
+- **Theme:** press the **Theme** button (top left in the Wii styles, next to Inputs and Wi-Fi in the Apple style) to cycle Apple, Wii and Wii Dark. The Wii styles are a 4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. They have no dock, so the hold-OK menu there offers Move, Hide, Unhide apps, Delete and Reset layout. The Wii grid keeps its own order, separate from the Apple dock.
 - **Wallpapers:** see `05-wallpapers.ps1`. The Apple style shows them behind the dock; the Wii style uses its own light background.
 
 ## Troubleshooting
