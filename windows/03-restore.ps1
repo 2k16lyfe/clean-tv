@@ -1,4 +1,4 @@
-# 03-restore.ps1  (version 2)
+# 03-restore.ps1  (version 3)
 # Turns packages back on. Reads the change log written by 02-debloat.ps1.
 #
 # Undo only what 02-debloat.ps1 disabled:
@@ -13,6 +13,8 @@
 param(
     [string]$AdbPath = "",
     [string]$BackupDir = "",
+    [string]$TvIp = "",
+    [int]$Port = 5555,
     [string[]]$Only = @(),
     [switch]$Everything
 )
@@ -25,7 +27,7 @@ function Fail($msg) {
     exit 1
 }
 
-Write-Host "03-restore.ps1 version 2"
+Write-Host "03-restore.ps1 version 3"
 
 # ---------- adb ----------
 if ($AdbPath -ne "") {
@@ -43,12 +45,34 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command adb -ErrorAction SilentlyContinue)) { Fail "adb not found. Use -AdbPath with the full path to adb.exe." }
 
 # ---------- find TV + backup ----------
-$root = (Get-Location).Path
-if (-not (Test-Path "$root\last_tv.txt")) { Fail "last_tv.txt not found. Run this from your tv-debloat folder." }
-$serial = (Get-Content "$root\last_tv.txt" -Raw).Trim()
+
+function Resolve-Device([string]$ip, [int]$port) {
+    $root = (Get-Location).Path
+    $lastTv = ""; $lastBk = ""
+    if (Test-Path "$root\last_tv.txt") { $lastTv = (Get-Content "$root\last_tv.txt" -Raw).Trim() }
+    if (Test-Path "$root\last_backup.txt") { $lastBk = (Get-Content "$root\last_backup.txt" -Raw).Trim() }
+    if ($ip -eq "") {
+        if ($lastTv -eq "") { Fail "No TV known yet. Run 01-backup.ps1 first, or pass -TvIp x.x.x.x" }
+        return @{ Serial = $lastTv; Backup = $lastBk }
+    }
+    $serial = "${ip}:${port}"
+    if ($serial -eq $lastTv -and $lastBk -ne "") { return @{ Serial = $serial; Backup = $lastBk } }
+    $hit = Get-ChildItem "$root\backups" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { (Test-Path "$($_.FullName)\serial.txt") -and ((Get-Content "$($_.FullName)\serial.txt" -Raw).Trim() -eq $serial) } |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if ($hit) { return @{ Serial = $serial; Backup = $hit.FullName } }
+    $dir = "$root\backups\unbacked-$ip"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $serial | Out-File -Encoding ascii "$dir\serial.txt"
+    Write-Host "No backup exists for $serial. Changes will be logged in $dir" -ForegroundColor Yellow
+    return @{ Serial = $serial; Backup = $dir }
+}
+
+$dev = Resolve-Device $TvIp $Port
+$serial = $dev.Serial
+$backup = $dev.Backup
 if ($BackupDir -ne "") { $backup = $BackupDir }
-elseif (Test-Path "$root\last_backup.txt") { $backup = (Get-Content "$root\last_backup.txt" -Raw).Trim() }
-else { Fail "No backup folder known. Pass -BackupDir." }
+if ($backup -eq "") { Fail "No backup folder known. Pass -BackupDir." }
 if (-not (Test-Path $backup)) { Fail "Backup folder not found: $backup" }
 
 Write-Host "TV:     $serial"

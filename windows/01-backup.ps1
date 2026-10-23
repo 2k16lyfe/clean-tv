@@ -112,6 +112,7 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $dir = Join-Path (Get-Location) "backups\$stamp"
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 New-Item -ItemType Directory -Path "$dir\apks" -Force | Out-Null
+$serial | Out-File -Encoding ascii "$dir\serial.txt"
 Write-Host ""
 Write-Host "Backup folder: $dir" -ForegroundColor Cyan
 

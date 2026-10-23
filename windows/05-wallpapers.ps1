@@ -1,9 +1,9 @@
-# 05-wallpapers.ps1  (version 1)
+# 05-wallpapers.ps1  (version 2)
 # Sends your own photos to the TV launcher as wallpapers, no rebuild needed.
 #   Put 1920x1080 .jpg/.png files in a folder called wallpapers (next to this script), then:
 #   powershell -ExecutionPolicy Bypass -File .\05-wallpapers.ps1
 #   Go back to the built-in nature photos:  add -Clear
-param([string]$AdbPath = "", [string]$Folder = ".\wallpapers", [switch]$Clear)
+param([string]$AdbPath = "", [string]$Folder = ".\wallpapers", [switch]$Clear, [string]$TvIp = "", [int]$Port = 5555)
 $ErrorActionPreference = "Continue"
 function Fail($m) { Write-Host "ERROR: $m" -ForegroundColor Red; exit 1 }
 if ($AdbPath -ne "") { $env:Path = (Split-Path $AdbPath) + ";" + $env:Path }
@@ -13,8 +13,10 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
     if ($hit) { $env:Path = (Split-Path $hit) + ";" + $env:Path }
 }
 if (-not (Get-Command adb -ErrorAction SilentlyContinue)) { Fail "adb not found. Use -AdbPath." }
-if (-not (Test-Path ".\last_tv.txt")) { Fail "Run this from your tv-debloat folder." }
-$serial = (Get-Content ".\last_tv.txt" -Raw).Trim()
+if ($TvIp -ne "") { $serial = "${TvIp}:${Port}" }
+elseif (Test-Path ".\last_tv.txt") { $serial = (Get-Content ".\last_tv.txt" -Raw).Trim() }
+else { Fail "No TV known. Pass -TvIp x.x.x.x" }
+Write-Host "TV: $serial"
 & adb connect $serial | Out-Null
 if ((& adb -s $serial get-state 2>$null) -ne "device") { Fail "TV not connected." }
 $dest = "/sdcard/Android/data/com.mihir.tvhome/files/wallpapers"
