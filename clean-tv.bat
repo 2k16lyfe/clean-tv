@@ -9,13 +9,18 @@ set "PS=powershell -NoProfile -ExecutionPolicy Bypass -File"
 set "TVIP="
 set "IPARG="
 set "LAST="
+set "TVNAME="
 if exist "last_tv.txt" for /f "usebackq delims=" %%a in ("last_tv.txt") do set "LAST=%%a"
+rem Pick the TV you used last time (saved in tv-devices.json by option T).
+if exist "%S%08-tv-devices.ps1" for /f "usebackq tokens=1,* delims=|" %%a in (`%PS% "%S%08-tv-devices.ps1" -Last`) do (set "TVIP=%%a" & set "TVNAME=%%b")
+if defined TVIP set "IPARG=-TvIp %TVIP%"
 
 :menu
 cls
 set "SHOW=not set - press T"
 if defined LAST set "SHOW=%LAST% [from last backup]"
 if defined TVIP set "SHOW=%TVIP%"
+if defined TVIP if defined TVNAME set "SHOW=%TVNAME% [%TVIP%]"
 echo ==========================================
 echo   clean-tv - Android TV tools
 echo ==========================================
@@ -33,7 +38,7 @@ echo   9  Use the built-in wallpapers again
 echo   R  Reset the launcher (fixes a stuck cursor)
 echo   S  Turn off Google TV's own screensaver
 echo   E  Turn Google TV's screensaver back on
-echo   T  Set the TV's IP address
+echo   T  Choose or add a TV
 echo   0  Exit
 echo.
 set "C="
@@ -55,8 +60,97 @@ if "%C%"=="0" goto :eof
 goto menu
 
 :setip
+if not exist "%S%08-tv-devices.ps1" goto setipold
+cls
+echo ==========================================
+echo   Choose a TV
+echo ==========================================
+set "COUNT=0"
+for /f "usebackq delims=" %%L in (`%PS% "%S%08-tv-devices.ps1" -List`) do (
+    echo   %%L
+    set /a COUNT+=1
+)
+if "%COUNT%"=="0" goto addtv
+echo.
+echo   N  Add a new TV
+echo   X  Forget a TV
+echo   C  Clear my choice
+echo   0  Back
+echo.
+set "PICK="
+set /p "PICK=Pick a number or letter: "
+if not defined PICK goto menu
+if /i "%PICK%"=="N" goto addtv
+if /i "%PICK%"=="X" goto forgettv
+if /i "%PICK%"=="C" goto cleartv
+if "%PICK%"=="0" goto menu
+set "GOTIP="
+set "GOTNAME="
+for /f "usebackq tokens=1,* delims=|" %%a in (`%PS% "%S%08-tv-devices.ps1" -Get`) do (set "GOTIP=%%a" & set "GOTNAME=%%b")
+if not defined GOTIP goto badpick
+set "TVIP=%GOTIP%"
+set "TVNAME=%GOTNAME%"
+set "IPARG=-TvIp %TVIP%"
+goto menu
+
+:addtv
+echo.
+set "NEWIP="
+set /p "NEWIP=TV IP address, like 192.168.1.50 (Enter to cancel): "
+if not defined NEWIP goto menu
+set "NEWNAME="
+set /p "NEWNAME=Name for this TV, like Living room (Enter to skip): "
+set "GOTIP="
+set "GOTNAME="
+for /f "usebackq tokens=1,* delims=|" %%a in (`%PS% "%S%08-tv-devices.ps1" -Add`) do (set "GOTIP=%%a" & set "GOTNAME=%%b")
+if not defined GOTIP goto badip
+set "TVIP=%GOTIP%"
+set "TVNAME=%GOTNAME%"
+set "IPARG=-TvIp %TVIP%"
+goto menu
+
+:forgettv
+echo.
+set "PICK="
+set /p "PICK=Number of the TV to forget (Enter to cancel): "
+if not defined PICK goto setip
+set "GOTIP="
+set "GOTNAME="
+for /f "usebackq tokens=1,* delims=|" %%a in (`%PS% "%S%08-tv-devices.ps1" -Remove`) do (set "GOTIP=%%a" & set "GOTNAME=%%b")
+if not defined GOTIP goto badpick
+echo   Forgot %GOTNAME%.
+if "%GOTIP%"=="%TVIP%" (
+    set "TVIP="
+    set "TVNAME="
+    set "IPARG="
+)
+pause
+goto setip
+
+:cleartv
+%PS% "%S%08-tv-devices.ps1" -ClearLast
 set "TVIP="
-set /p "TVIP=TV IP address, like 10.0.0.28 (Enter to clear): "
+set "TVNAME="
+set "IPARG="
+goto menu
+
+:badpick
+echo.
+echo   That is not one of the numbers in the list.
+pause
+goto setip
+
+:badip
+echo.
+echo   That does not look like an IP address. It should look like 192.168.1.50
+pause
+goto setip
+
+:setipold
+rem Used when 08-tv-devices.ps1 is not next to the other scripts.
+set "TVIP="
+set "TVNAME="
+set /p "TVIP=TV IP address, like 192.168.1.50 (Enter to clear): "
 if defined TVIP (set "IPARG=-TvIp %TVIP%") else (set "IPARG=")
 goto menu
 
