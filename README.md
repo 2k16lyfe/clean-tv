@@ -24,6 +24,12 @@ can be undone with a script.
 - **Your own wallpapers** pushed from a folder, no rebuild needed.
 - **Undo scripts** for the debloat and for the home screen.
 
+## Screenshots
+
+| Before (stock Google TV, onn 4K) | Apple TV style | Wii style (light) |
+|---|---|---|
+| ![Stock Google TV home screen](screenshots/stock-google-tv.png) | ![Apple TV-style home screen with a dock of apps](screenshots/apple-style.png) | ![Wii-style grid of app tiles on a light background](screenshots/wii-light.png) |
+
 ## Tested on
 
 One device: **onn 4K box (Google TV, Android 14)**. The debloat lists are built for that box. On any other
