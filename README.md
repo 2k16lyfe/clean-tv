@@ -17,8 +17,7 @@ can be undone with a script.
 - **Debloat with prompts.** Disables ad-tech, feedback services and streaming apps you don't use, one
   group at a time, with a screenshot check after each. A protected list covers voice, remote, Bluetooth and Play services.
 - **A tiny launcher.** Dock, app grid, clock, crossfading wallpapers. No ads, no recommendations, no network use for content.
-- **Two looks.** The Apple TV-style dock, or a light Wii-inspired grid of channel tiles with pages and a bottom bar
-  (original artwork only, not affiliated with Nintendo). Switch any time from the hold-OK menu.
+- **Three looks.** The Apple TV-style dock, a light Wii-inspired grid of channel tiles with pages and a bottom bar, or a dark version of that grid (original artwork only, not affiliated with Nintendo). Switch any time with the Theme button.
 - **Hold OK on an app** to Move, Remove from dock, Hide, Delete (apps you installed) or Reset layout.
 - **Your own wallpapers** pushed from a folder, no rebuild needed.
 - **Undo scripts** for the debloat and for the home screen.
@@ -77,9 +76,7 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 ## Customise
 
 - **On the TV:** hold OK on a tile to rearrange. The layout is saved on the TV.
-- **Theme:** hold OK on any app and choose **Switch to Wii style** or **Switch to Apple style**. Wii style is a
-  4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. It has
-  no dock, so the hold-OK menu there offers Hide, Delete, the theme switch and Reset layout.
+- **Theme:** press the **Theme** button (top left in the Wii styles, next to Inputs and Wi-Fi in the Apple style) to cycle Apple, Wii and Wii Dark. The Wii styles are a 4x3 grid of channel tiles: press Left on the first column or Right on the last column to change page. They have no dock, so the hold-OK menu there offers Hide, Delete and Reset layout.
 - **Wallpapers:** see `05-wallpapers.ps1`. The Apple style shows them behind the dock; the Wii style uses its own light background.
 
 ## Troubleshooting
