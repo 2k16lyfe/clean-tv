@@ -83,6 +83,8 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 - **`adb` not found:** open a new terminal after installing, or use `-AdbPath`.
 - **`failed to authenticate`:** accept the **Allow USB debugging?** prompt on the TV.
+- **Cursor stuck after updating while on a Wii theme:** older builds could start with focus on a hidden tile. Reset the launcher with `adb shell pm clear com.mihir.tvhome` (add `-s <TV_IP>:5555` if adb says more than one device), which returns it to the Apple style. Fixed in newer builds. To be safe on an old build, switch to the Apple theme before installing a new `tvhome.apk`.
+- **`adb: more than one device/emulator`:** add `-s <TV_IP>:5555` to the adb command.
 - **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** the installed launcher was signed with a different key.
   `04-install-launcher.ps1` offers to switch back to the stock home, remove it and reinstall. 
 - **Home button misbehaves:** run `04-install-launcher.ps1 -Revert`. On Google TV the setup app
