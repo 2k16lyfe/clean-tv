@@ -31,6 +31,8 @@ echo   7  Go back to the stock home screen
 echo   8  Push my wallpapers
 echo   9  Use the built-in wallpapers again
 echo   R  Reset the launcher (fixes a stuck cursor)
+echo   S  Turn off Google TV's own screensaver
+echo   E  Turn Google TV's screensaver back on
 echo   T  Set the TV's IP address
 echo   0  Exit
 echo.
@@ -46,6 +48,8 @@ if "%C%"=="7" goto revert
 if "%C%"=="8" goto wall
 if "%C%"=="9" goto wallclear
 if /i "%C%"=="R" goto reset
+if /i "%C%"=="S" goto ssoff
+if /i "%C%"=="E" goto sson
 if /i "%C%"=="T" goto setip
 if "%C%"=="0" goto :eof
 goto menu
@@ -95,6 +99,20 @@ goto done
 :reset
 if not exist "%S%06-reset-launcher.ps1" goto noreset
 %PS% "%S%06-reset-launcher.ps1" %IPARG%
+goto done
+
+:ssoff
+if not exist "%S%07-screensaver.ps1" goto nosaver
+%PS% "%S%07-screensaver.ps1" %IPARG%
+goto done
+
+:sson
+if not exist "%S%07-screensaver.ps1" goto nosaver
+%PS% "%S%07-screensaver.ps1" -On %IPARG%
+goto done
+
+:nosaver
+echo 07-screensaver.ps1 is missing. Copy it next to the other scripts.
 goto done
 
 :noreset
