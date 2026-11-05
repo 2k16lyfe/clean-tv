@@ -1,7 +1,7 @@
 # 09-immich.ps1
 # Sets up Immich photos as wallpapers. You type your Immich address and an API key here on the PC
 # (easy typing), the script checks them, and then sends them to the TV. The TV keeps them in the
-# launcher's private storage. Nothing about your server is ever saved in this repo or on this PC.
+# launcher's private storage. Photos are streamed from your server when they are shown, not saved. Nothing about your server is ever saved in this repo or on this PC.
 #   powershell -ExecutionPolicy Bypass -File .\09-immich.ps1
 #   Add -TvIp x.x.x.x if the script does not know your TV yet.
 #   Add -Insecure if your Immich uses https with your own (self-signed) certificate.
@@ -152,7 +152,7 @@ $cfg = [ordered]@{ url = $Url; key = $key; insecure = [bool]$Insecure }
 $ok = Send-Config (ConvertTo-Json -InputObject $cfg -Compress)
 Write-Host ""
 if ($ok) {
-    Write-Host "Done. The TV has your Immich details and is downloading photos." -ForegroundColor Green
+    Write-Host "Done. The TV has your Immich details and will stream your photos when it shows them." -ForegroundColor Green
     Write-Host "On the TV: Wallpapers > Immich settings to choose albums, people or single photos."
 } else {
     Write-Host "Sent, but the TV has not picked it up yet. Open the home screen on the TV and wait about 10 seconds." -ForegroundColor Yellow
