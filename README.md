@@ -103,9 +103,12 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
   the Wii styles use their own background but show it on the idle screen.
 - **Immich:** make a read-only API key in Immich (**Account Settings > API Keys**) with only `asset.read`, `asset.view`, `album.read` and
   `person.read`. Run `clean-tv.bat`, press **I**, and type your server address (like `http://192.168.1.20:2283`) and the key. The TV
-  keeps a small set of 1440 px previews (50 to 300 photos, your choice) and refreshes them daily. In **Wallpapers > Immich settings**
+  **streams** your photos from the server when each one is shown (a 1440 px preview, about 400 KB), so nothing is saved on the TV.
+  Only a list of photo ids is kept, refreshed daily, and if the server is off the TV uses your other wallpapers until it is back.
+  Prefer to save them? **Save previews on the TV** keeps 50 to 300 photos on the TV instead. In **Wallpapers > Immich settings**
   you can choose the whole library, favorites, albums, people or individual photos, and set "Photos from" to My photos, Immich or Both.
   The locked folder is not supported: Immich only opens it with a login session and PIN, never with an API key.
+  Streamed Immich photos cannot be pinned in the Static picker, which lists photos stored on the TV. Use Rotating, or pick Save mode.
 - **Idle screen:** set in the Wallpapers panel. Run `07-screensaver.ps1` once so Google TV's own screensaver does not start first.
 
 ## Troubleshooting
@@ -137,7 +140,8 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - Use at your own risk. This is not affiliated with Google, Walmart/onn, Nintendo or any TV maker.
 - Your `backups/` folder contains device identifiers and copies of installed APKs. It is git-ignored; never publish it.
   The Immich address and key are typed into `09-immich.ps1` at run time, sent to the TV and never written on the PC. On the TV they live in
-  the launcher's private storage, and the Immich photos are saved there too. "Forget this server" in the Immich settings erases both.
+  the launcher's private storage. In the default Stream mode no pictures are saved, only a list of photo ids. In Save mode the previews are
+  stored there too. "Forget this server" in the Immich settings erases everything.
   The launcher accepts plain `http://` because home servers usually have no certificate. Only use Immich on a network you trust.
   The same goes for `tv-devices.json` (the TVs the menu remembers), `last_tv.txt` and `last_backup.txt`, which hold your TV's address.
 - The scripts only run `pm disable-user`, `pm enable`, `adb install`, and `adb uninstall` of the launcher itself.
