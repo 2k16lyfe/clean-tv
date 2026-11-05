@@ -121,8 +121,9 @@ public class MainActivity extends Activity {
     private TextView idleClock, idleDate;
     private final Runnable idleTick = new Runnable() {
         @Override public void run() {
+            importImmichConfig();
             int m = idleMinutes();
-            if (!idleOn && m > 0 && !popupOpen() && movingPkg == null && !wallPanelShowing()
+            if (!idleOn && m > 0 && !popupOpen() && movingPkg == null && !wallPanelShowing() && !immichPanelShowing()
                     && SystemClock.elapsedRealtime() - lastInput >= m * 60_000L) enterIdle();
             handler.postDelayed(this, 10_000);
         }
@@ -182,6 +183,8 @@ public class MainActivity extends Activity {
         // Catch installs/removals that happened while another app was in front.
         if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
+        importImmichConfig();
+        immichMaybeSync();
         // New photo on return if the current one has been up for the full interval.
         long iv = wallIntervalMs();
         if (!wallRotating()) { if (!wallStaticKey().equals(shownKey)) nextWallpaper(); }
@@ -219,6 +222,13 @@ public class MainActivity extends Activity {
         // Home pressed while already home: jump back to the first dock app.
         lastInput = SystemClock.elapsedRealtime();
         if (idleOn) { exitIdle(); return; }
+        importImmichConfig();
+        if (immichPanelShowing()) {
+            immichGen++;
+            rootView.removeView(immichPanel);
+            applyTheme();
+            if (immichDirty) { immichDirty = false; immichSync(); }
+        }
         if (wallPanelShowing()) closeWallPanel();
         if (inputsPopup != null) inputsPopup.dismiss();
         if (wii()) { wiiPage = 0; buildWiiGrid(0, 0); return; }
@@ -228,6 +238,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (immichPanelShowing()) { immichBack(); return; }
         if (wallPanelShowing()) { closeWallPanel(); return; }
         // Home has nowhere to go back to; Back from the grid returns to the dock.
         if (scroll.getScrollY() > 0 && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
@@ -1525,13 +1536,21 @@ public class MainActivity extends Activity {
     /** What rotation cycles through: your photos if you pushed any, otherwise the built-in ones. */
     private String[] wallPool() {
         List<String> l = new ArrayList<>();
+        String src = wallSource();
+        if (!"immich".equals(src)) localWallKeys(l);
+        if (!"local".equals(src)) l.addAll(immichKeys());
+        if (l.isEmpty()) localWallKeys(l); // Immich chosen but nothing synced yet
+        return l.toArray(new String[0]);
+    }
+
+    private void localWallKeys(List<String> l) {
         if (extWalls.length > 0) { for (java.io.File f : extWalls) l.add("c:" + f.getName()); }
         else { for (String w : wallpapers) l.add("b:" + w); }
-        return l.toArray(new String[0]);
     }
 
     private List<String> allWallKeys() {
         List<String> l = new ArrayList<>();
+        if (!"local".equals(wallSource())) l.addAll(immichKeys());
         for (java.io.File f : extWalls) l.add("c:" + f.getName());
         for (String w : wallpapers) l.add("b:" + w);
         return l;
@@ -1539,6 +1558,10 @@ public class MainActivity extends Activity {
 
     private Drawable loadWall(String key) {
         try {
+            if (key.startsWith("i:")) {
+                Bitmap b = decodeSampled(new java.io.File(immichDir(), key.substring(2) + ".jpg"));
+                return b == null ? null : new BitmapDrawable(getResources(), b);
+            }
             if (key.startsWith("c:")) {
                 java.io.File f = new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2));
                 if (f.getName().toLowerCase(Locale.ROOT).endsWith(".gif")) {
@@ -1592,8 +1615,10 @@ public class MainActivity extends Activity {
         try {
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inPreferredConfig = Bitmap.Config.RGB_565;
-            if (key.startsWith("c:")) {
-                String path = new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2)).getPath();
+            if (key.startsWith("c:") || key.startsWith("i:")) {
+                String path = (key.startsWith("i:")
+                        ? new java.io.File(immichDir(), key.substring(2) + ".jpg")
+                        : new java.io.File(getExternalFilesDir("wallpapers"), key.substring(2))).getPath();
                 o.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(path, o);
                 o.inSampleSize = thumbSample(o.outWidth);
@@ -1676,8 +1701,19 @@ public class MainActivity extends Activity {
         title.setText("Wallpapers");
         col.addView(title);
         TextView sub = text(13, "sans-serif", 0x99FFFFFF);
-        sub.setText(extWalls.length + " of your photos on this TV  \u00B7  " + wallpapers.length + " built in");
+        int nIm = immichKeys().size();
+        sub.setText(extWalls.length + " of your photos on this TV  \u00B7  " + wallpapers.length + " built in"
+                + (nIm > 0 ? "  \u00B7  " + nIm + " from Immich" : ""));
         col.addView(sub, llp(-2, -2, 0, dp(4), 0, dp(22)));
+
+        col.addView(panelLabel("Photos from"));
+        LinearLayout srcRow = chipRow();
+        final String src = wallSource();
+        srcRow.addView(chip("My photos", src.equals("local"), "s-local", () -> setWallSource("local")), llp(-2, dp(38), 0, 0, dp(10), 0));
+        srcRow.addView(chip("Immich", src.equals("immich"), "s-immich", () -> setWallSource("immich")), llp(-2, dp(38), 0, 0, dp(10), 0));
+        srcRow.addView(chip("Both", src.equals("both"), "s-both", () -> setWallSource("both")), llp(-2, dp(38), 0, 0, dp(10), 0));
+        srcRow.addView(chip("Immich settings\u2026", false, "s-set", () -> showImmichPanel("main", null)), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(srcRow, llp(-2, -2, 0, dp(8), 0, dp(20)));
 
         col.addView(panelLabel("Mode"));
         LinearLayout modeRow = chipRow();
@@ -1824,6 +1860,624 @@ public class MainActivity extends Activity {
         applyTheme();
         View f = wii() ? wiiWallPill : wallPill;
         if (f != null) f.requestFocus();
+    }
+
+    // ---------------------------------------------------------------- Immich photos
+    // Optional wallpaper source. The server address and API key are sent from the PC by clean-tv.bat
+    // and kept only in this app's private storage. Nothing about any server is part of the code.
+
+    private Immich immichClient;
+    private volatile boolean immichSyncing;
+    private volatile String immichStatus = "";
+    private FrameLayout immichPanel;
+    private int immichGen;
+    private boolean immichDirty;
+    private boolean immichConfirmForget;
+    private String immichView = "main";
+
+    private android.content.SharedPreferences immichPrefs() { return getSharedPreferences("immich", MODE_PRIVATE); }
+
+    private boolean immichPanelShowing() { return immichPanel != null && immichPanel.getParent() != null; }
+
+    private java.io.File immichDir() { return new java.io.File(getFilesDir(), "immich"); }
+
+    private String wallSource() { return wallPrefs().getString("source", "local"); }
+
+    private Immich immich() {
+        android.content.SharedPreferences p = immichPrefs();
+        String url = p.getString("url", ""), key = p.getString("key", "");
+        if (url.isEmpty() || key.isEmpty()) return null;
+        if (immichClient == null) {
+            immichClient = new Immich(url, key, p.getBoolean("insecure", false));
+            immichClient.setShape(p.getInt("shape", -1));
+        }
+        return immichClient;
+    }
+
+    private java.util.LinkedHashSet<String> csv(String k) {
+        java.util.LinkedHashSet<String> s = new java.util.LinkedHashSet<>();
+        for (String x : immichPrefs().getString(k, "").split(",")) if (!x.trim().isEmpty()) s.add(x.trim());
+        return s;
+    }
+
+    private void saveCsv(String k, java.util.Collection<String> v) {
+        immichPrefs().edit().putString(k, android.text.TextUtils.join(",", v)).apply();
+    }
+
+    /** Photos already saved on the TV, as wallpaper keys. */
+    private List<String> immichKeys() {
+        List<String> l = new ArrayList<>();
+        java.io.File[] fs = immichDir().listFiles((d, n) -> n.endsWith(".jpg"));
+        if (fs != null) {
+            Arrays.sort(fs);
+            for (java.io.File f : fs) {
+                String n = f.getName();
+                l.add("i:" + n.substring(0, n.length() - 4));
+            }
+        }
+        return l;
+    }
+
+    private String ago(long t) {
+        long m = Math.max(0, (System.currentTimeMillis() - t) / 60000);
+        if (m < 2) return "just now";
+        if (m < 90) return m + " min ago";
+        long h = m / 60;
+        if (h < 48) return h + " h ago";
+        return (h / 24) + " days ago";
+    }
+
+    private String immichSummary() {
+        android.content.SharedPreferences p = immichPrefs();
+        String host = null;
+        try { host = android.net.Uri.parse(p.getString("url", "")).getHost(); } catch (Exception ignored) { }
+        long last = p.getLong("lastSync", 0);
+        return (host == null ? "" : host) + "  \u00B7  " + immichKeys().size() + " photos on this TV  \u00B7  "
+                + (last == 0 ? "not synced yet" : "synced " + ago(last));
+    }
+
+    /** Picks up the file the PC script pushed, keeps its contents in private storage, then deletes it. */
+    private void importImmichConfig() {
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null) return;
+        java.io.File f = new java.io.File(dir, "immich.json");
+        if (!f.isFile()) return;
+        try {
+            String txt = new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            org.json.JSONObject o = new org.json.JSONObject(txt);
+            if (o.optBoolean("forget", false)) {
+                forgetImmich();
+                return;
+            }
+            String url = Immich.normalize(o.optString("url", ""));
+            String key = o.optString("key", "").trim();
+            if (url.isEmpty() || key.isEmpty()) return;
+            android.content.SharedPreferences p = immichPrefs();
+            boolean first = p.getString("key", "").isEmpty();
+            android.content.SharedPreferences.Editor ed = p.edit().putString("url", url).putString("key", key)
+                    .putBoolean("insecure", o.optBoolean("insecure", false)).putInt("shape", -1).putLong("lastSync", 0);
+            if (first) ed.putBoolean("useLibrary", true);
+            ed.apply();
+            if (first) wallPrefs().edit().putString("source", "both").apply();
+            immichClient = null;
+            immichSync();
+        } catch (Exception ignored) {
+        } finally {
+            f.delete();
+        }
+    }
+
+    private void forgetImmich() {
+        immichPrefs().edit().clear().apply();
+        immichClient = null;
+        java.io.File[] fs = immichDir().listFiles();
+        if (fs != null) for (java.io.File x : fs) x.delete();
+        if (!"local".equals(wallSource())) wallPrefs().edit().putString("source", "local").apply();
+        immichStatus = "";
+        nextWallpaper();
+    }
+
+    private void immichMaybeSync() {
+        if (immich() == null || immichSyncing || "local".equals(wallSource())) return;
+        android.content.SharedPreferences p = immichPrefs();
+        long last = p.getLong("lastSync", 0), now = System.currentTimeMillis();
+        int hours = p.getInt("refreshH", 24);
+        boolean due = last == 0 || (hours > 0 && now - last > hours * 3_600_000L);
+        if (due || (immichKeys().isEmpty() && now - last > 600_000L)) immichSync();
+    }
+
+    private void setImmichStatus(final String s) {
+        immichStatus = s;
+        runOnUiThread(() -> {
+            if (!immichPanelShowing()) return;
+            View v = immichPanel.findViewWithTag("istatus");
+            if (v instanceof TextView) ((TextView) v).setText(s);
+        });
+    }
+
+    /** Asks Immich what to keep, downloads what is missing and removes what is no longer wanted. */
+    private void immichSync() {
+        final Immich cl = immich();
+        if (cl == null || immichSyncing) return;
+        immichSyncing = true;
+        final android.content.SharedPreferences p = immichPrefs();
+        final boolean lib = p.getBoolean("useLibrary", true), fav = p.getBoolean("useFav", false);
+        final List<String> albums = new ArrayList<>(csv("albums"));
+        final List<String> people = new ArrayList<>(csv("people"));
+        final List<String> picks = new ArrayList<>(csv("picks"));
+        final int max = Math.max(10, p.getInt("maxPhotos", 100));
+        final boolean hadAny = !immichKeys().isEmpty();
+        setImmichStatus("Starting\u2026");
+        new Thread(() -> {
+            String done;
+            try {
+                if (!lib && !fav && albums.isEmpty() && people.isEmpty() && picks.isEmpty()) {
+                    done = "Nothing is selected. Choose what to show.";
+                } else {
+                    Immich.Result r = cl.collect(lib, fav, albums, people, picks, max, s -> setImmichStatus(s + "\u2026"));
+                    java.io.File dir = immichDir();
+                    dir.mkdirs();
+                    int have = 0, got = 0, miss = 0, n = 0;
+                    for (String id : r.ids) {
+                        n++;
+                        java.io.File f = new java.io.File(dir, id + ".jpg");
+                        if (f.isFile() && f.length() > 0) { have++; continue; }
+                        setImmichStatus("Downloading " + n + " of " + r.ids.size() + "\u2026");
+                        try { cl.downloadPreview(id, f); got++; } catch (Immich.Failure e) { miss++; }
+                    }
+                    // Only tidy up after a clean run, so a hiccup never wipes photos you already have.
+                    if (r.warnings.isEmpty()) {
+                        Set<String> keep = new HashSet<>(r.ids);
+                        java.io.File[] old = dir.listFiles();
+                        if (old != null) for (java.io.File f : old) {
+                            String nm = f.getName();
+                            if (!(nm.endsWith(".jpg") && keep.contains(nm.substring(0, nm.length() - 4)))) f.delete();
+                        }
+                    }
+                    p.edit().putLong("lastSync", System.currentTimeMillis()).putInt("shape", cl.shape()).apply();
+                    done = (have + got) + " photos on this TV" + (got > 0 ? ", " + got + " new" : "")
+                            + (miss > 0 ? ", " + miss + " could not be downloaded" : "");
+                    if (!r.warnings.isEmpty()) done += ". " + r.warnings.get(0);
+                }
+            } catch (Immich.Failure e) {
+                done = "Sync failed: " + e.getMessage();
+            } catch (Exception e) {
+                done = "Sync failed";
+            }
+            final String msg = done;
+            runOnUiThread(() -> {
+                immichSyncing = false;
+                setImmichStatus(msg);
+                if (isDestroyed() || "local".equals(wallSource())) return;
+                if (!wallPanelShowing() && !immichPanelShowing()) {
+                    boolean gone = shownKey.startsWith("i:")
+                            && !new java.io.File(immichDir(), shownKey.substring(2) + ".jpg").isFile();
+                    if (!hadAny || gone) nextWallpaper();
+                }
+            });
+        }).start();
+    }
+
+    private void setWallSource(String s) {
+        if (!"local".equals(s) && immich() == null) { showImmichPanel("main", null); return; }
+        wallPrefs().edit().putString("source", s).apply();
+        if (!"local".equals(s)) immichMaybeSync();
+        nextWallpaper();
+        showWallPanel("s-" + s);
+    }
+
+    private void showImmichPanel(String view, String focusTag) {
+        immichView = view;
+        if (wallPanelShowing()) { thumbGen++; rootView.removeView(wallPanel); }
+        final int gen = ++immichGen;
+        if (immichPanel == null || immichPanel.getParent() == null) {
+            immichPanel = new FrameLayout(this);
+            immichPanel.setBackgroundColor(0xF2101418);
+            rootView.addView(immichPanel, new FrameLayout.LayoutParams(-1, -1));
+            scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            wiiLayer.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        }
+        immichPanel.removeAllViews();
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(56), dp(40), dp(56), dp(48));
+        sv.addView(col, new FrameLayout.LayoutParams(-1, -2));
+        immichPanel.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+        Immich cl = immich();
+        if (cl != null && "albums".equals(view)) immichAlbums(col, cl, gen, false);
+        else if (cl != null && "people".equals(view)) immichPeople(col, cl, gen);
+        else if (cl != null && "browse".equals(view)) immichAlbums(col, cl, gen, true);
+        else if (cl != null && view.startsWith("photos:")) immichPhotos(col, cl, gen, view.substring(7));
+        else { immichView = "main"; immichMain(col, cl); }
+        View f = focusTag == null ? null : immichPanel.findViewWithTag(focusTag);
+        if (f == null) f = immichPanel.findViewWithTag("first");
+        if (f == null) f = immichPanel.findViewWithTag("done");
+        if (f != null) f.requestFocus();
+    }
+
+    private void closeImmichPanel() {
+        immichGen++;
+        immichConfirmForget = false;
+        if (immichPanelShowing()) rootView.removeView(immichPanel);
+        if (immichDirty) { immichDirty = false; immichSync(); }
+        showWallPanel("s-set");
+    }
+
+    private void immichBack() {
+        if (immichView.startsWith("photos:")) showImmichPanel("browse", "first");
+        else if ("albums".equals(immichView)) showImmichPanel("main", "o-albums");
+        else if ("people".equals(immichView)) showImmichPanel("main", "o-people");
+        else if ("browse".equals(immichView)) showImmichPanel("main", "o-photos");
+        else closeImmichPanel();
+    }
+
+    private void immichMain(LinearLayout col, Immich cl) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText("Immich");
+        col.addView(title);
+        TextView sub = text(13, "sans-serif", 0x99FFFFFF);
+        col.addView(sub, llp(-2, -2, 0, dp(4), 0, dp(22)));
+        if (cl == null) {
+            sub.setText("Not set up yet");
+            TextView how = text(15, "sans-serif", 0xE6FFFFFF);
+            how.setText("Set it up from your PC. Run clean-tv.bat and choose I. You type your Immich address and an API key once, "
+                    + "and the PC sends them to this TV. Nothing about your server is saved in the app itself.");
+            col.addView(how, llp(dp(720), -2, 0, 0, 0, 0));
+            col.addView(chip("Back", false, "done", () -> closeImmichPanel()), llp(-2, dp(38), 0, dp(26), 0, 0));
+            return;
+        }
+        sub.setText(immichSummary());
+        final android.content.SharedPreferences p = immichPrefs();
+
+        col.addView(panelLabel("Show photos from"));
+        LinearLayout r1 = chipRow();
+        r1.addView(chip("Whole library", p.getBoolean("useLibrary", true), "u-lib", () -> {
+            p.edit().putBoolean("useLibrary", !p.getBoolean("useLibrary", true)).apply();
+            immichDirty = true;
+            showImmichPanel("main", "u-lib");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r1.addView(chip("Favorites", p.getBoolean("useFav", false), "u-fav", () -> {
+            p.edit().putBoolean("useFav", !p.getBoolean("useFav", false)).apply();
+            immichDirty = true;
+            showImmichPanel("main", "u-fav");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(r1, llp(-2, -2, 0, dp(8), 0, dp(10)));
+        LinearLayout r2 = chipRow();
+        int na = csv("albums").size(), np = csv("people").size(), nk = csv("picks").size();
+        r2.addView(chip(na == 0 ? "Choose albums\u2026" : "Albums (" + na + ")\u2026", na > 0, "o-albums",
+                () -> showImmichPanel("albums", null)), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r2.addView(chip(np == 0 ? "Choose people\u2026" : "People (" + np + ")\u2026", np > 0, "o-people",
+                () -> showImmichPanel("people", null)), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r2.addView(chip(nk == 0 ? "Pick photos\u2026" : "Picked photos (" + nk + ")\u2026", nk > 0, "o-photos",
+                () -> showImmichPanel("browse", null)), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(r2, llp(-2, -2, 0, 0, 0, dp(20)));
+
+        col.addView(panelLabel("Keep on this TV"));
+        LinearLayout r3 = chipRow();
+        int cur = p.getInt("maxPhotos", 100);
+        for (int m : new int[]{50, 100, 200, 300}) {
+            final int mm = m;
+            r3.addView(chip(m + " photos", cur == m, "k-" + m, () -> {
+                p.edit().putInt("maxPhotos", mm).apply();
+                immichDirty = true;
+                showImmichPanel("main", "k-" + mm);
+            }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        }
+        col.addView(r3, llp(-2, -2, 0, dp(8), 0, dp(20)));
+
+        col.addView(panelLabel("Refresh"));
+        LinearLayout r4 = chipRow();
+        int hrs = p.getInt("refreshH", 24);
+        String[] names = {"Every day", "Every week", "Only when I press Sync now"};
+        int[] vals = {24, 168, 0};
+        for (int i = 0; i < 3; i++) {
+            final int v = vals[i];
+            r4.addView(chip(names[i], hrs == v, "r-" + v, () -> {
+                p.edit().putInt("refreshH", v).apply();
+                showImmichPanel("main", "r-" + v);
+            }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        }
+        col.addView(r4, llp(-2, -2, 0, dp(8), 0, dp(22)));
+
+        LinearLayout r5 = chipRow();
+        r5.addView(chip("Sync now", false, "sync", () -> { immichDirty = false; immichSync(); }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r5.addView(chip("Remove these photos from the TV", false, "clear", () -> {
+            java.io.File[] fs = immichDir().listFiles();
+            if (fs != null) for (java.io.File x : fs) x.delete();
+            p.edit().putLong("lastSync", 0).apply();
+            nextWallpaper();
+            showImmichPanel("main", "clear");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r5.addView(chip(immichConfirmForget ? "Press again to forget this server" : "Forget this server", false, "forget", () -> {
+            if (!immichConfirmForget) { immichConfirmForget = true; showImmichPanel("main", "forget"); return; }
+            immichConfirmForget = false;
+            forgetImmich();
+            showImmichPanel("main", null);
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(r5);
+        TextView st = text(13, "sans-serif", 0xCCFFFFFF);
+        st.setTag("istatus");
+        st.setText(immichSyncing ? immichStatus : immichStatus.isEmpty() ? "Changes are applied when you press Done." : immichStatus);
+        col.addView(st, llp(-2, -2, 0, dp(12), 0, 0));
+        col.addView(chip("Done", false, "done", () -> closeImmichPanel()), llp(-2, dp(38), 0, dp(22), 0, 0));
+    }
+
+    private FrameLayout immichCard(int w, int h, String caption, boolean selected) {
+        FrameLayout card = new FrameLayout(this);
+        card.setFocusable(true);
+        card.setId(View.generateViewId());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        bg.setColor(0xFF1E252C);
+        card.setBackground(bg);
+        card.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+        card.setClipToOutline(true);
+        ImageView iv = new ImageView(this);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        iv.setTag("img");
+        card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        if (caption != null) {
+            TextView cap = text(12, "sans-serif-medium", Color.WHITE);
+            cap.setText(caption);
+            cap.setSingleLine(true);
+            cap.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            cap.setPadding(dp(8), dp(4), dp(8), dp(4));
+            cap.setBackgroundColor(0xB3000000);
+            card.addView(cap, lp(-1, -2, Gravity.BOTTOM, 0, 0, 0, 0));
+        }
+        final GradientDrawable ring = new GradientDrawable();
+        ring.setCornerRadius(dp(10));
+        ring.setStroke(dp(3), 0x00000000);
+        card.setForeground(ring);
+        card.setOnFocusChangeListener((v, has) -> {
+            ring.setStroke(dp(3), has ? 0xFF4FC3F7 : 0x00000000);
+            v.animate().scaleX(has ? 1.05f : 1f).scaleY(has ? 1.05f : 1f).setDuration(120).start();
+        });
+        setCardSelected(card, selected);
+        return card;
+    }
+
+    private void setCardSelected(FrameLayout card, boolean on) {
+        View old = card.findViewWithTag("ck");
+        if (on && old == null) {
+            TextView ck = text(15, "sans-serif-medium", Color.WHITE);
+            ck.setText("\u2713");
+            ck.setGravity(Gravity.CENTER);
+            ck.setTag("ck");
+            GradientDrawable cb = new GradientDrawable();
+            cb.setShape(GradientDrawable.OVAL);
+            cb.setColor(0xFF4FC3F7);
+            ck.setBackground(cb);
+            card.addView(ck, lp(dp(26), dp(26), Gravity.TOP | Gravity.END, 0, dp(6), dp(6), 0));
+        } else if (!on && old != null) {
+            card.removeView(old);
+        }
+    }
+
+    private void gridAdd(LinearLayout host, int[] n, LinearLayout[] row, View card, int perRow, int tw, int th) {
+        int gap = dp(12);
+        if (n[0] % perRow == 0) {
+            row[0] = new LinearLayout(this);
+            row[0].setOrientation(LinearLayout.HORIZONTAL);
+            row[0].setClipChildren(false);
+            host.addView(row[0], llp(-2, -2, 0, n[0] == 0 ? dp(8) : gap, 0, 0));
+        }
+        row[0].addView(card, llp(tw, th, n[0] % perRow == 0 ? 0 : gap, 0, 0, 0));
+        n[0]++;
+    }
+
+    private int cardWidth(int perRow) {
+        int W = getResources().getDisplayMetrics().widthPixels;
+        return (W - dp(112) - dp(12) * (perRow - 1)) / perRow;
+    }
+
+    /** Fetches small pictures one at a time. Requests look like "a:ASSETID" or "p:PERSONID". */
+    private void immichLoadThumbs(final int gen, final Immich cl, final List<String> reqs, final List<ImageView> ivs) {
+        new Thread(() -> {
+            for (int i = 0; i < reqs.size(); i++) {
+                if (gen != immichGen) return;
+                String r = reqs.get(i);
+                if (r == null || r.length() < 3) continue;
+                try {
+                    byte[] b = r.startsWith("p:") ? cl.personThumbnail(r.substring(2)) : cl.thumbnail(r.substring(2));
+                    final Bitmap bm = BitmapFactory.decodeByteArray(b, 0, b.length);
+                    final ImageView target = ivs.get(i);
+                    if (bm != null) runOnUiThread(() -> { if (gen == immichGen) target.setImageBitmap(bm); });
+                } catch (Immich.Failure ignored) {
+                }
+            }
+        }).start();
+    }
+
+    private void immichAlbums(final LinearLayout col, final Immich cl, final int gen, final boolean browse) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText(browse ? "Pick photos from\u2026" : "Albums");
+        col.addView(title);
+        TextView hint = text(13, "sans-serif", 0x99FFFFFF);
+        hint.setText(browse ? "Choose an album, then pick the photos you want."
+                : "Press OK to select or unselect. Photos from selected albums are used as wallpapers.");
+        col.addView(hint, llp(-2, -2, 0, dp(4), 0, dp(18)));
+        final TextView loading = text(14, "sans-serif", 0xB3FFFFFF);
+        loading.setText("Loading albums\u2026");
+        col.addView(loading);
+        final LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        host.setClipChildren(false);
+        col.addView(host);
+        col.addView(chip("Done", false, "done", () -> showImmichPanel("main", browse ? "o-photos" : "o-albums")),
+                llp(-2, dp(38), 0, dp(26), 0, 0));
+        new Thread(() -> {
+            try {
+                final List<Immich.Album> al = cl.albums();
+                runOnUiThread(() -> {
+                    if (gen != immichGen) return;
+                    final java.util.LinkedHashSet<String> sel = csv("albums");
+                    final int perRow = 4, tw = cardWidth(perRow), th = tw * 10 / 16;
+                    int[] n = {0};
+                    LinearLayout[] row = {null};
+                    List<String> reqs = new ArrayList<>();
+                    List<ImageView> ivs = new ArrayList<>();
+                    if (browse) {
+                        FrameLayout rc = immichCard(tw, th, "Recent photos", false);
+                        rc.setTag("first");
+                        rc.setOnClickListener(v -> showImmichPanel("photos:recent", null));
+                        gridAdd(host, n, row, rc, perRow, tw, th);
+                        ivs.add((ImageView) rc.findViewWithTag("img"));
+                        reqs.add("");
+                    }
+                    for (final Immich.Album a : al) {
+                        final FrameLayout card = immichCard(tw, th, a.name + "  \u00B7  " + a.count, !browse && sel.contains(a.id));
+                        if (n[0] == 0) card.setTag("first");
+                        card.setOnClickListener(v -> {
+                            if (browse) { showImmichPanel("photos:" + a.id, null); return; }
+                            if (!sel.remove(a.id)) sel.add(a.id);
+                            saveCsv("albums", sel);
+                            immichDirty = true;
+                            setCardSelected(card, sel.contains(a.id));
+                        });
+                        gridAdd(host, n, row, card, perRow, tw, th);
+                        ivs.add((ImageView) card.findViewWithTag("img"));
+                        reqs.add(a.cover.isEmpty() ? "" : "a:" + a.cover);
+                    }
+                    loading.setText(al.isEmpty() && !browse ? "No albums found." : "");
+                    loading.setVisibility(al.isEmpty() && !browse ? View.VISIBLE : View.GONE);
+                    immichLoadThumbs(gen, cl, reqs, ivs);
+                    View f = immichPanel == null ? null : immichPanel.findViewWithTag("first");
+                    if (f != null) f.requestFocus();
+                });
+            } catch (Immich.Failure e) {
+                runOnUiThread(() -> { if (gen == immichGen) loading.setText("Could not load albums: " + e.getMessage()); });
+            }
+        }).start();
+    }
+
+    private void immichPeople(final LinearLayout col, final Immich cl, final int gen) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText("People");
+        col.addView(title);
+        TextView hint = text(13, "sans-serif", 0x99FFFFFF);
+        hint.setText("Press OK to select or unselect. Only people with a name in Immich are listed.");
+        col.addView(hint, llp(-2, -2, 0, dp(4), 0, dp(18)));
+        final TextView loading = text(14, "sans-serif", 0xB3FFFFFF);
+        loading.setText("Loading people\u2026");
+        col.addView(loading);
+        final LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        host.setClipChildren(false);
+        col.addView(host);
+        col.addView(chip("Done", false, "done", () -> showImmichPanel("main", "o-people")), llp(-2, dp(38), 0, dp(26), 0, 0));
+        new Thread(() -> {
+            try {
+                final List<Immich.Person> pe = cl.people(300);
+                runOnUiThread(() -> {
+                    if (gen != immichGen) return;
+                    final java.util.LinkedHashSet<String> sel = csv("people");
+                    final int perRow = 5, tw = cardWidth(perRow), th = tw;
+                    int[] n = {0};
+                    LinearLayout[] row = {null};
+                    List<String> reqs = new ArrayList<>();
+                    List<ImageView> ivs = new ArrayList<>();
+                    for (final Immich.Person pp : pe) {
+                        final FrameLayout card = immichCard(tw, th, pp.name, sel.contains(pp.id));
+                        if (n[0] == 0) card.setTag("first");
+                        card.setOnClickListener(v -> {
+                            if (!sel.remove(pp.id)) sel.add(pp.id);
+                            saveCsv("people", sel);
+                            immichDirty = true;
+                            setCardSelected(card, sel.contains(pp.id));
+                        });
+                        gridAdd(host, n, row, card, perRow, tw, th);
+                        ivs.add((ImageView) card.findViewWithTag("img"));
+                        reqs.add("p:" + pp.id);
+                    }
+                    loading.setText(pe.isEmpty() ? "No named people found. Name people in Immich first." : "");
+                    loading.setVisibility(pe.isEmpty() ? View.VISIBLE : View.GONE);
+                    immichLoadThumbs(gen, cl, reqs, ivs);
+                    View f = immichPanel == null ? null : immichPanel.findViewWithTag("first");
+                    if (f != null) f.requestFocus();
+                });
+            } catch (Immich.Failure e) {
+                runOnUiThread(() -> { if (gen == immichGen) loading.setText("Could not load people: " + e.getMessage()); });
+            }
+        }).start();
+    }
+
+    private void immichPhotos(final LinearLayout col, final Immich cl, final int gen, final String albumKey) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText(albumKey.equals("recent") ? "Recent photos" : "Pick photos");
+        col.addView(title);
+        final TextView hint = text(13, "sans-serif", 0x99FFFFFF);
+        hint.setText("Press OK to pick or unpick a photo.  " + csv("picks").size() + " picked in total.");
+        col.addView(hint, llp(-2, -2, 0, dp(4), 0, dp(18)));
+        final TextView loading = text(14, "sans-serif", 0xB3FFFFFF);
+        loading.setText("Loading photos\u2026");
+        col.addView(loading);
+        final LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        host.setClipChildren(false);
+        col.addView(host);
+        final int[] n = {0};
+        final LinearLayout[] row = {null};
+        final String[] token = {null};
+        final boolean[] busy = {false};
+        final boolean[] firstLoad = {true};
+        final Runnable[] loader = new Runnable[1];
+        final TextView more = chip("More photos", false, "more", () -> loader[0].run());
+        more.setVisibility(View.GONE);
+        col.addView(more, llp(-2, dp(38), 0, dp(16), 0, 0));
+        col.addView(chip("Done", false, "done", () -> showImmichPanel("browse", "first")), llp(-2, dp(38), 0, dp(16), 0, 0));
+        loader[0] = () -> {
+            if (busy[0]) return;
+            busy[0] = true;
+            new Thread(() -> {
+                try {
+                    Immich.Spec s = new Immich.Spec();
+                    if (!albumKey.equals("recent")) s.albums.add(albumKey);
+                    final Immich.Page pg = cl.search("/search/metadata", s, 30, token[0], false);
+                    runOnUiThread(() -> {
+                        if (gen != immichGen) return;
+                        busy[0] = false;
+                        final java.util.LinkedHashSet<String> picks = csv("picks");
+                        final int perRow = 5, tw = cardWidth(perRow), th = tw * 9 / 16;
+                        List<String> reqs = new ArrayList<>();
+                        List<ImageView> ivs = new ArrayList<>();
+                        FrameLayout firstCard = null;
+                        for (final String id : pg.ids) {
+                            final FrameLayout card = immichCard(tw, th, null, picks.contains(id));
+                            if (firstCard == null) firstCard = card;
+                            card.setOnClickListener(v -> {
+                                java.util.LinkedHashSet<String> cur = csv("picks");
+                                if (!cur.remove(id)) cur.add(id);
+                                saveCsv("picks", cur);
+                                immichDirty = true;
+                                setCardSelected(card, cur.contains(id));
+                                hint.setText("Press OK to pick or unpick a photo.  " + cur.size() + " picked in total.");
+                            });
+                            gridAdd(host, n, row, card, perRow, tw, th);
+                            ivs.add((ImageView) card.findViewWithTag("img"));
+                            reqs.add("a:" + id);
+                        }
+                        token[0] = pg.next;
+                        more.setVisibility(pg.next != null ? View.VISIBLE : View.GONE);
+                        loading.setVisibility(View.GONE);
+                        if (n[0] == 0) { loading.setText("No photos found here."); loading.setVisibility(View.VISIBLE); }
+                        immichLoadThumbs(gen, cl, reqs, ivs);
+                        if (firstLoad[0] && firstCard != null) { firstCard.setTag("first"); firstCard.requestFocus(); }
+                        firstLoad[0] = false;
+                    });
+                } catch (Immich.Failure e) {
+                    runOnUiThread(() -> {
+                        if (gen != immichGen) return;
+                        busy[0] = false;
+                        loading.setText("Could not load photos: " + e.getMessage());
+                        loading.setVisibility(View.VISIBLE);
+                    });
+                }
+            }).start();
+        };
+        loader[0].run();
     }
 
     private void enterIdle() {
