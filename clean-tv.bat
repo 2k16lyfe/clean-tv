@@ -35,6 +35,7 @@ echo   6  Install the launcher (needs tvhome.apk in this folder)
 echo   7  Go back to the stock home screen
 echo   8  Push my wallpapers
 echo   9  Use the built-in wallpapers again
+echo   I  Set up Immich photos as wallpapers
 echo   R  Reset the launcher (fixes a stuck cursor)
 echo   S  Turn off Google TV's own screensaver
 echo   E  Turn Google TV's screensaver back on
@@ -52,6 +53,7 @@ if "%C%"=="6" goto install
 if "%C%"=="7" goto revert
 if "%C%"=="8" goto wall
 if "%C%"=="9" goto wallclear
+if /i "%C%"=="I" goto immich
 if /i "%C%"=="R" goto reset
 if /i "%C%"=="S" goto ssoff
 if /i "%C%"=="E" goto sson
@@ -188,6 +190,15 @@ goto done
 
 :wallclear
 %PS% "%S%05-wallpapers.ps1" -Clear %IPARG%
+goto done
+
+:immich
+if not exist "%S%09-immich.ps1" goto noimmich
+%PS% "%S%09-immich.ps1" %IPARG%
+goto done
+
+:noimmich
+echo 09-immich.ps1 is missing. Copy it next to the other scripts.
 goto done
 
 :reset
