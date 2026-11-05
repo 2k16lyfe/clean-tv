@@ -449,7 +449,7 @@ final class Immich {
         List<List<String>> lists = new ArrayList<>();
         int sources = 0, failed = 0;
         Failure firstFailure = null;
-        int cap = Math.min(1000, Math.max(max, 50));
+        int cap = Math.min(2000, Math.max(max, 50));
 
         if (library) {
             sources++;
@@ -550,10 +550,15 @@ final class Immich {
         return r.body;
     }
 
-    /** A 1440 px preview, large enough for a 1080p screen. Saved only when the whole file arrived. */
-    void downloadPreview(String assetId, File out) throws Failure {
+    /** A 1440 px preview, large enough for a 1080p screen. Used for streaming: nothing is written to disk. */
+    byte[] preview(String assetId) throws Failure {
         if (!validId(assetId)) throw new Failure(0, "Bad photo id");
-        byte[] b = image("/assets/" + assetId + "/thumbnail?size=preview", 60000);
+        return image("/assets/" + assetId + "/thumbnail?size=preview", 60000);
+    }
+
+    /** Same preview, saved only when the whole file arrived. */
+    void downloadPreview(String assetId, File out) throws Failure {
+        byte[] b = preview(assetId);
         File tmp = new File(out.getPath() + ".part");
         try (FileOutputStream f = new FileOutputStream(tmp)) {
             f.write(b);
