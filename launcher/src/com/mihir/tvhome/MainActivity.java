@@ -1538,8 +1538,11 @@ public class MainActivity extends Activity {
         List<String> l = new ArrayList<>();
         String src = wallSource();
         if (!"immich".equals(src)) localWallKeys(l);
-        if (!"local".equals(src)) l.addAll(immichKeys());
-        if (l.isEmpty()) localWallKeys(l); // Immich chosen but nothing synced yet
+        if (!"local".equals(src)) {
+            if (!immichStream()) l.addAll(immichKeys());
+            else if (!streamDown()) l.addAll(streamKeys());
+        }
+        if (l.isEmpty()) localWallKeys(l); // Immich chosen but nothing ready yet, or the server is unreachable
         return l.toArray(new String[0]);
     }
 
@@ -1550,7 +1553,7 @@ public class MainActivity extends Activity {
 
     private List<String> allWallKeys() {
         List<String> l = new ArrayList<>();
-        if (!"local".equals(wallSource())) l.addAll(immichKeys());
+        if (!"local".equals(wallSource()) && !immichStream()) l.addAll(immichKeys()); // streamed photos are not browsable here
         for (java.io.File f : extWalls) l.add("c:" + f.getName());
         for (String w : wallpapers) l.add("b:" + w);
         return l;
@@ -1558,6 +1561,30 @@ public class MainActivity extends Activity {
 
     private Drawable loadWall(String key) {
         try {
+            if (key.startsWith("s:")) {
+                Immich cl = immich();
+                if (cl == null || streamDown()) return null;
+                try {
+                    byte[] raw = cl.preview(key.substring(2));
+                    BitmapFactory.Options bo = new BitmapFactory.Options();
+                    bo.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(raw, 0, raw.length, bo);
+                    int sc = 1;
+                    while (bo.outWidth / (sc * 2) >= 1920 && bo.outHeight / (sc * 2) >= 1080) sc *= 2;
+                    BitmapFactory.Options o = new BitmapFactory.Options();
+                    o.inSampleSize = sc;
+                    o.inPreferredConfig = Bitmap.Config.RGB_565;
+                    Bitmap b = BitmapFactory.decodeByteArray(raw, 0, raw.length, o);
+                    return b == null ? null : new BitmapDrawable(getResources(), b);
+                } catch (Immich.Failure f) {
+                    // Server off, key rejected, wrong address: pause streaming for a few minutes and use local photos.
+                    if (f.code == 0 || f.code == 401 || f.code == 403) {
+                        streamDownUntil = System.currentTimeMillis() + 5 * 60_000L;
+                        immichStatus = "Could not stream: " + f.getMessage();
+                    }
+                    return null;
+                }
+            }
             if (key.startsWith("i:")) {
                 Bitmap b = decodeSampled(new java.io.File(immichDir(), key.substring(2) + ".jpg"));
                 return b == null ? null : new BitmapDrawable(getResources(), b);
@@ -1701,7 +1728,7 @@ public class MainActivity extends Activity {
         title.setText("Wallpapers");
         col.addView(title);
         TextView sub = text(13, "sans-serif", 0x99FFFFFF);
-        int nIm = immichKeys().size();
+        int nIm = immichPoolCount();
         sub.setText(extWalls.length + " of your photos on this TV  \u00B7  " + wallpapers.length + " built in"
                 + (nIm > 0 ? "  \u00B7  " + nIm + " from Immich" : ""));
         col.addView(sub, llp(-2, -2, 0, dp(4), 0, dp(22)));
@@ -1883,6 +1910,27 @@ public class MainActivity extends Activity {
 
     private String wallSource() { return wallPrefs().getString("source", "local"); }
 
+    /** Streaming is the default: photos are fetched from Immich when shown and never saved. */
+    private boolean immichStream() { return "stream".equals(immichPrefs().getString("store", "stream")); }
+
+    private long streamDownUntil;
+
+    private boolean streamDown() { return System.currentTimeMillis() < streamDownUntil; }
+
+    /** Photo ids to stream, as wallpaper keys. Only the ids are kept, never the pictures. */
+    private List<String> streamKeys() {
+        List<String> l = new ArrayList<>();
+        for (String id : csv("streamIds")) if (Immich.validId(id)) l.add("s:" + id);
+        return l;
+    }
+
+    private int immichPoolCount() { return immichStream() ? streamKeys().size() : immichKeys().size(); }
+
+    private void deleteSavedImmich() {
+        java.io.File[] fs = immichDir().listFiles();
+        if (fs != null) for (java.io.File x : fs) x.delete();
+    }
+
     private Immich immich() {
         android.content.SharedPreferences p = immichPrefs();
         String url = p.getString("url", ""), key = p.getString("key", "");
@@ -1932,8 +1980,9 @@ public class MainActivity extends Activity {
         String host = null;
         try { host = android.net.Uri.parse(p.getString("url", "")).getHost(); } catch (Exception ignored) { }
         long last = p.getLong("lastSync", 0);
-        return (host == null ? "" : host) + "  \u00B7  " + immichKeys().size() + " photos on this TV  \u00B7  "
-                + (last == 0 ? "not synced yet" : "synced " + ago(last));
+        return (host == null ? "" : host) + "  \u00B7  " + immichPoolCount()
+                + (immichStream() ? " photos in the rotation, streamed  \u00B7  " : " photos saved on this TV  \u00B7  ")
+                + (last == 0 ? "not updated yet" : "updated " + ago(last));
     }
 
     /** Picks up the file the PC script pushed, keeps its contents in private storage, then deletes it. */
@@ -1983,7 +2032,7 @@ public class MainActivity extends Activity {
         long last = p.getLong("lastSync", 0), now = System.currentTimeMillis();
         int hours = p.getInt("refreshH", 24);
         boolean due = last == 0 || (hours > 0 && now - last > hours * 3_600_000L);
-        if (due || (immichKeys().isEmpty() && now - last > 600_000L)) immichSync();
+        if (due || (immichPoolCount() == 0 && now - last > 600_000L)) immichSync();
     }
 
     private void setImmichStatus(final String s) {
@@ -2005,8 +2054,9 @@ public class MainActivity extends Activity {
         final List<String> albums = new ArrayList<>(csv("albums"));
         final List<String> people = new ArrayList<>(csv("people"));
         final List<String> picks = new ArrayList<>(csv("picks"));
-        final int max = Math.max(10, p.getInt("maxPhotos", 100));
-        final boolean hadAny = !immichKeys().isEmpty();
+        final boolean stream = immichStream();
+        final int max = stream ? Math.max(50, p.getInt("maxStream", 500)) : Math.max(10, p.getInt("maxPhotos", 100));
+        final boolean hadAny = immichPoolCount() > 0;
         setImmichStatus("Starting\u2026");
         new Thread(() -> {
             String done;
@@ -2015,6 +2065,18 @@ public class MainActivity extends Activity {
                     done = "Nothing is selected. Choose what to show.";
                 } else {
                     Immich.Result r = cl.collect(lib, fav, albums, people, picks, max, s -> setImmichStatus(s + "\u2026"));
+                    if (stream) {
+                        // Streaming: keep only the list of photo ids. A hiccup keeps the ids we already had.
+                        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>(r.ids);
+                        if (!r.warnings.isEmpty()) ids.addAll(csv("streamIds"));
+                        List<String> keepIds = new ArrayList<>(ids);
+                        if (keepIds.size() > max) keepIds = new ArrayList<>(keepIds.subList(0, max));
+                        p.edit().putString("streamIds", android.text.TextUtils.join(",", keepIds))
+                                .putLong("lastSync", System.currentTimeMillis()).putInt("shape", cl.shape()).apply();
+                        streamDownUntil = 0;
+                        done = keepIds.size() + " photos in the rotation. They stream when shown; nothing is saved on the TV";
+                        if (!r.warnings.isEmpty()) done += ". " + r.warnings.get(0);
+                    } else {
                     java.io.File dir = immichDir();
                     dir.mkdirs();
                     int have = 0, got = 0, miss = 0, n = 0;
@@ -2038,9 +2100,10 @@ public class MainActivity extends Activity {
                     done = (have + got) + " photos on this TV" + (got > 0 ? ", " + got + " new" : "")
                             + (miss > 0 ? ", " + miss + " could not be downloaded" : "");
                     if (!r.warnings.isEmpty()) done += ". " + r.warnings.get(0);
+                    }
                 }
             } catch (Immich.Failure e) {
-                done = "Sync failed: " + e.getMessage();
+                done = (stream ? "Update failed: " : "Sync failed: ") + e.getMessage();
             } catch (Exception e) {
                 done = "Sync failed";
             }
@@ -2154,13 +2217,34 @@ public class MainActivity extends Activity {
                 () -> showImmichPanel("browse", null)), llp(-2, dp(38), 0, 0, dp(10), 0));
         col.addView(r2, llp(-2, -2, 0, 0, 0, dp(20)));
 
-        col.addView(panelLabel("Keep on this TV"));
+        final boolean stream = immichStream();
+        col.addView(panelLabel("How photos reach the TV"));
+        LinearLayout rs = chipRow();
+        rs.addView(chip("Stream (nothing is saved)", stream, "m-stream", () -> {
+            if (!immichStream()) {
+                p.edit().putString("store", "stream").apply();
+                deleteSavedImmich();
+                immichDirty = true;
+            }
+            showImmichPanel("main", "m-stream");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        rs.addView(chip("Save previews on the TV", !stream, "m-save", () -> {
+            if (immichStream()) {
+                p.edit().putString("store", "save").apply();
+                immichDirty = true;
+            }
+            showImmichPanel("main", "m-save");
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(rs, llp(-2, -2, 0, dp(8), 0, dp(20)));
+
+        col.addView(panelLabel(stream ? "Photos in the rotation" : "Keep on this TV"));
         LinearLayout r3 = chipRow();
-        int cur = p.getInt("maxPhotos", 100);
-        for (int m : new int[]{50, 100, 200, 300}) {
+        final String maxKey = stream ? "maxStream" : "maxPhotos";
+        int cur = p.getInt(maxKey, stream ? 500 : 100);
+        for (int m : stream ? new int[]{100, 300, 500, 1000} : new int[]{50, 100, 200, 300}) {
             final int mm = m;
             r3.addView(chip(m + " photos", cur == m, "k-" + m, () -> {
-                p.edit().putInt("maxPhotos", mm).apply();
+                p.edit().putInt(maxKey, mm).apply();
                 immichDirty = true;
                 showImmichPanel("main", "k-" + mm);
             }), llp(-2, dp(38), 0, 0, dp(10), 0));
@@ -2182,14 +2266,15 @@ public class MainActivity extends Activity {
         col.addView(r4, llp(-2, -2, 0, dp(8), 0, dp(22)));
 
         LinearLayout r5 = chipRow();
-        r5.addView(chip("Sync now", false, "sync", () -> { immichDirty = false; immichSync(); }), llp(-2, dp(38), 0, 0, dp(10), 0));
-        r5.addView(chip("Remove these photos from the TV", false, "clear", () -> {
-            java.io.File[] fs = immichDir().listFiles();
-            if (fs != null) for (java.io.File x : fs) x.delete();
-            p.edit().putLong("lastSync", 0).apply();
-            nextWallpaper();
-            showImmichPanel("main", "clear");
-        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r5.addView(chip(stream ? "Refresh the list now" : "Sync now", false, "sync", () -> { immichDirty = false; immichSync(); }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        if (!stream) {
+            r5.addView(chip("Remove these photos from the TV", false, "clear", () -> {
+                deleteSavedImmich();
+                p.edit().putLong("lastSync", 0).apply();
+                nextWallpaper();
+                showImmichPanel("main", "clear");
+            }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        }
         r5.addView(chip(immichConfirmForget ? "Press again to forget this server" : "Forget this server", false, "forget", () -> {
             if (!immichConfirmForget) { immichConfirmForget = true; showImmichPanel("main", "forget"); return; }
             immichConfirmForget = false;
@@ -2199,7 +2284,10 @@ public class MainActivity extends Activity {
         col.addView(r5);
         TextView st = text(13, "sans-serif", 0xCCFFFFFF);
         st.setTag("istatus");
-        st.setText(immichSyncing ? immichStatus : immichStatus.isEmpty() ? "Changes are applied when you press Done." : immichStatus);
+        st.setText(immichSyncing ? immichStatus : immichStatus.isEmpty()
+                ? (stream ? "Photos load from your Immich server when they are shown. Only the list of photo ids is kept here. Changes apply when you press Done."
+                        : "Changes apply when you press Done.")
+                : immichStatus);
         col.addView(st, llp(-2, -2, 0, dp(12), 0, 0));
         col.addView(chip("Done", false, "done", () -> closeImmichPanel()), llp(-2, dp(38), 0, dp(22), 0, 0));
     }
