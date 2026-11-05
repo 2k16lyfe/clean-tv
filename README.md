@@ -16,7 +16,7 @@ can be undone with a script.
 - **Backup first.** Package lists, settings, current launcher and a screenshot are saved before any change.
 - **Debloat with prompts.** Disables ad-tech, feedback services and streaming apps you don't use, one
   group at a time, with a screenshot check after each. A protected list covers voice, remote, Bluetooth and Play services.
-- **A tiny launcher.** Dock, app grid, clock, crossfading wallpapers. No ads, no recommendations, no network use for content.
+- **A tiny launcher.** Dock, app grid, clock, crossfading wallpapers. No ads, no recommendations. The only network use is optional and goes to *your own* Immich server, if you set it up.
 - **Three looks.** The Apple TV-style dock, a light Wii-inspired grid of channel tiles with pages and a bottom bar, or a dark version of that grid (original artwork only, not affiliated with Nintendo). Switch any time with the Theme button.
 - **Hold OK on an app** to Move, Remove from dock, Hide, Unhide apps, Delete (apps you installed) or Reset layout. In the Wii styles, Move works with all four arrows.
 - **A pointing hand** glides to whichever tile or button is selected in the Wii styles.
@@ -25,6 +25,8 @@ can be undone with a script.
 - **Wallpaper settings on the TV.** A **Wallpapers** button opens a clean panel: choose Rotating or Static, pick how often
   the photo changes (1 minute to 1 hour), or pick one photo from a grid of previews.
 - **Your own wallpapers** pushed from a folder, no rebuild needed. Animated **GIFs** work too.
+- **Immich photos as wallpapers.** Use your self-hosted [Immich](https://immich.app) library: pick albums, people, favorites or
+  single photos on the TV. Set up once with `clean-tv.bat` (option **I**). No server address or key is stored in this repo.
 - **Idle screen.** After a few minutes with nothing pressed, the apps hide and the wallpaper fills the screen with the time
   in the corner. Any button brings the apps back. The delay is set in the Wallpapers panel (Off, 2, 5, 10 or 30 minutes).
 - **Undo scripts** for the debloat and for the home screen.
@@ -86,6 +88,7 @@ Run from the repo root. Prefix each with `powershell -ExecutionPolicy Bypass -Fi
 | `.\windows\04-install-launcher.ps1 -Revert` | Goes back to the stock home screen. |
 | `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png, or animated .gif) to the TV. |
 | `.\windows\05-wallpapers.ps1 -Clear` | Goes back to the built-in photos. |
+| `.\windows\09-immich.ps1 [-Insecure] [-Forget]` | Sends your Immich address and API key to the TV (typed on the PC, kept only on the TV). `-Forget` removes them. |
 | `.\windows\06-reset-launcher.ps1` | Resets the launcher to defaults (Apple style, default layout). Fixes a stuck cursor. |
 | `.\windows\07-screensaver.ps1` | Turns off Google TV's own screensaver so the launcher's idle screen is the only one. Add `-On` to undo. |
 
@@ -98,6 +101,11 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **Wallpapers:** press the **Wallpapers** button (next to Theme). Choose **Rotating** and a delay, or **Static** and tap a preview.
   Your own photos and GIFs come from `05-wallpapers.ps1`; the panel shows how many are on the TV, and GIF previews carry a small GIF tag. The Apple style shows the wallpaper behind the dock;
   the Wii styles use their own background but show it on the idle screen.
+- **Immich:** make a read-only API key in Immich (**Account Settings > API Keys**) with only `asset.read`, `asset.view`, `album.read` and
+  `person.read`. Run `clean-tv.bat`, press **I**, and type your server address (like `http://192.168.1.20:2283`) and the key. The TV
+  keeps a small set of 1440 px previews (50 to 300 photos, your choice) and refreshes them daily. In **Wallpapers > Immich settings**
+  you can choose the whole library, favorites, albums, people or individual photos, and set "Photos from" to My photos, Immich or Both.
+  The locked folder is not supported: Immich only opens it with a login session and PIN, never with an API key.
 - **Idle screen:** set in the Wallpapers panel. Run `07-screensaver.ps1` once so Google TV's own screensaver does not start first.
 
 ## Troubleshooting
@@ -107,6 +115,9 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **Cursor stuck after updating while on a Wii theme:** older builds could start with focus on a hidden tile. Reset the launcher with `adb shell pm clear com.mihir.tvhome` (add `-s <TV_IP>:5555` if adb says more than one device), which returns it to the Apple style. Fixed in newer builds. To be safe on an old build, switch to the Apple theme before installing a new `tvhome.apk`.
 - **A GIF wallpaper stutters:** small TV boxes can struggle with big animations. Keep GIFs under about 15 MB and no larger than 1920x1080
   (shorter and smaller is smoother). The launcher scales big ones down, and animation pauses while you are in another app.
+- **Immich says "Sync failed":** the message after it says why. "Could not connect" means the TV cannot reach the address (same network? right port?).
+  "The API key was rejected" means the key was copied wrong or deleted. "missing a permission" means the key needs the four permissions above.
+  Run option **I** again to send a fixed address or key. Photos you already have stay on the TV when a sync fails.
 - **Custom wallpapers do not seem to change:** the default is one photo every 10 minutes, and a photo that cannot be read is skipped.
   Open the **Wallpapers** panel to shorten the delay. If it says 0 of your photos, push them again with `05-wallpapers.ps1`
   (reinstalling or resetting the launcher removes them). Check with `adb shell ls -l /sdcard/Android/data/com.mihir.tvhome/files/wallpapers`.
@@ -125,6 +136,9 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 
 - Use at your own risk. This is not affiliated with Google, Walmart/onn, Nintendo or any TV maker.
 - Your `backups/` folder contains device identifiers and copies of installed APKs. It is git-ignored; never publish it.
+  The Immich address and key are typed into `09-immich.ps1` at run time, sent to the TV and never written on the PC. On the TV they live in
+  the launcher's private storage, and the Immich photos are saved there too. "Forget this server" in the Immich settings erases both.
+  The launcher accepts plain `http://` because home servers usually have no certificate. Only use Immich on a network you trust.
   The same goes for `tv-devices.json` (the TVs the menu remembers), `last_tv.txt` and `last_backup.txt`, which hold your TV's address.
 - The scripts only run `pm disable-user`, `pm enable`, `adb install`, and `adb uninstall` of the launcher itself.
   The Delete option in the launcher uses Android's own uninstall dialog.
