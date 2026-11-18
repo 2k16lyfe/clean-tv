@@ -107,6 +107,9 @@ if ($out -match "UPDATE_INCOMPATIBLE") {
 }
 if ($out -notmatch "Success") { Fail "Install failed. Paste the line above to Claude." }
 Sh "pm grant $NEW android.permission.ACCESS_FINE_LOCATION" | Out-Null
+# For "Remote buttons": switch the service on from the launcher, and open apps from a button press.
+Sh "pm grant $NEW android.permission.WRITE_SECURE_SETTINGS" | Out-Null
+Sh "appops set $NEW SYSTEM_ALERT_WINDOW allow" | Out-Null
 if ((Sh "pm list packages $NEW") -notmatch $NEW) { Fail "Launcher not found after install." }
 Write-Host "  last updated on TV: $(Sh "dumpsys package $NEW | grep lastUpdateTime")"
 Write-Host "Installed. Google TV's home is still the default and still enabled." -ForegroundColor Green
