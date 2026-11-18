@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="button_service_desc">Lets Home change what the app buttons on your remote open. Only the buttons you set up under Remote buttons are changed. Nothing is read or sent anywhere.</string>
+</resources>
