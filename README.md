@@ -24,6 +24,8 @@ can be undone with a script.
   you pick one by number instead of retyping its IP. The scripts below still work on their own.
 - **Wallpaper settings on the TV.** A **Wallpapers** button opens a clean panel: choose Rotating or Static, pick how often
   the photo changes (1 minute to 1 hour), or pick one photo from a grid of previews.
+- **Remote buttons.** Choose what the YouTube, Netflix, Disney+ and Paramount+ buttons on your remote open: any app you have installed.
+  Open **Buttons** on the home screen, press the button once so it is learned, then pick the app. Each button can be put back to original.
 - **Your own wallpapers** pushed from a folder, no rebuild needed. Animated **GIFs** work too.
 - **Immich photos as wallpapers.** Use your self-hosted [Immich](https://immich.app) library: pick albums, people, favorites or
   single photos on the TV. Set up once with `clean-tv.bat` (option **I**). No server address or key is stored in this repo.
@@ -89,6 +91,7 @@ Run from the repo root. Prefix each with `powershell -ExecutionPolicy Bypass -Fi
 | `.\windows\05-wallpapers.ps1` | Pushes your `wallpapers` folder (1920x1080 .jpg/.png, or animated .gif) to the TV. |
 | `.\windows\05-wallpapers.ps1 -Clear` | Goes back to the built-in photos. |
 | `.\windows\09-immich.ps1 [-Insecure] [-Forget]` | Sends your Immich address and API key to the TV (typed on the PC, kept only on the TV). `-Forget` removes them. |
+| `.\windows\10-remote-permissions.ps1` | One time: lets the launcher turn its Remote buttons service on and open apps from a button. Also menu option **B**. |
 | `.\windows\06-reset-launcher.ps1` | Resets the launcher to defaults (Apple style, default layout). Fixes a stuck cursor. |
 | `.\windows\07-screensaver.ps1` | Turns off Google TV's own screensaver so the launcher's idle screen is the only one. Add `-On` to undo. |
 
@@ -109,6 +112,11 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
   you can choose the whole library, favorites, albums, people or individual photos, and set "Photos from" to My photos, Immich or Both.
   The locked folder is not supported: Immich only opens it with a login session and PIN, never with an API key.
   Streamed Immich photos cannot be pinned in the Static picker, which lists photos stored on the TV. Use Rotating, or pick Save mode.
+- **Remote buttons:** after installing the new `tvhome.apk`, run `clean-tv.bat` option **B** once. On the TV open **Buttons** (top of the home screen),
+  turn on **Remote button control**, then for each button press **Learn button** and press that button on your remote, then **Choose app**.
+  **Back to original** gives a button its normal job again, and turning the control off leaves your remote exactly as it was.
+  Google TV has no built-in way to remap these buttons, so this uses an Android accessibility service, the same method other remapper apps use.
+  It looks at key presses only to find the buttons you set up, ignores every other key, stores only those choices, and sends nothing anywhere.
 - **Idle screen:** set in the Wallpapers panel. Run `07-screensaver.ps1` once so Google TV's own screensaver does not start first.
 
 ## Troubleshooting
@@ -121,6 +129,10 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
 - **Immich says "Sync failed":** the message after it says why. "Could not connect" means the TV cannot reach the address (same network? right port?).
   "The API key was rejected" means the key was copied wrong or deleted. "missing a permission" means the key needs the four permissions above.
   Run option **I** again to send a fixed address or key. Photos you already have stay on the TV when a sync fails.
+- **A remapped button still opens the old app:** make sure **Remote button control** is On in the Buttons screen and the button shows "Detected as ...".
+  The remote has to be paired to this TV, and the service only works while the TV is on. If it still fails, run option **B** again and then turn the control off and on.
+- **The remote feels slow or odd after turning Remote button control on:** turn it off in the Buttons screen. Accessibility key handling is known to make some remotes
+  glitchy on some devices, so only keep it on if you use a remapped button.
 - **Custom wallpapers do not seem to change:** the default is one photo every 10 minutes, and a photo that cannot be read is skipped.
   Open the **Wallpapers** panel to shorten the delay. If it says 0 of your photos, push them again with `05-wallpapers.ps1`
   (reinstalling or resetting the launcher removes them). Check with `adb shell ls -l /sdcard/Android/data/com.mihir.tvhome/files/wallpapers`.
@@ -143,6 +155,7 @@ If `adb` isn't found, add `-AdbPath "C:\path\to\adb.exe"`.
   the launcher's private storage. In the default Stream mode no pictures are saved, only a list of photo ids. In Save mode the previews are
   stored there too. "Forget this server" in the Immich settings erases everything.
   The launcher accepts plain `http://` because home servers usually have no certificate. Only use Immich on a network you trust.
+  The Remote buttons service stays off until you turn it on, and the two permissions it needs are granted only over ADB by option **B**.
   The same goes for `tv-devices.json` (the TVs the menu remembers), `last_tv.txt` and `last_backup.txt`, which hold your TV's address.
 - The scripts only run `pm disable-user`, `pm enable`, `adb install`, and `adb uninstall` of the launcher itself.
   The Delete option in the launcher uses Android's own uninstall dialog.

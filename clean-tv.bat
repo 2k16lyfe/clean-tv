@@ -36,6 +36,7 @@ echo   7  Go back to the stock home screen
 echo   8  Push my wallpapers
 echo   9  Use the built-in wallpapers again
 echo   I  Set up Immich photos as wallpapers
+echo   B  Allow remote button control (one time)
 echo   R  Reset the launcher (fixes a stuck cursor)
 echo   S  Turn off Google TV's own screensaver
 echo   E  Turn Google TV's screensaver back on
@@ -54,6 +55,7 @@ if "%C%"=="7" goto revert
 if "%C%"=="8" goto wall
 if "%C%"=="9" goto wallclear
 if /i "%C%"=="I" goto immich
+if /i "%C%"=="B" goto buttons
 if /i "%C%"=="R" goto reset
 if /i "%C%"=="S" goto ssoff
 if /i "%C%"=="E" goto sson
@@ -190,6 +192,15 @@ goto done
 
 :wallclear
 %PS% "%S%05-wallpapers.ps1" -Clear %IPARG%
+goto done
+
+:buttons
+if not exist "%S%10-remote-permissions.ps1" goto nobuttons
+%PS% "%S%10-remote-permissions.ps1" %IPARG%
+goto done
+
+:nobuttons
+echo 10-remote-permissions.ps1 is missing. Copy it next to the other scripts.
 goto done
 
 :immich
