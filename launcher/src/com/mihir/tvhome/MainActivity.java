@@ -123,7 +123,7 @@ public class MainActivity extends Activity {
         @Override public void run() {
             importImmichConfig();
             int m = idleMinutes();
-            if (!idleOn && m > 0 && !popupOpen() && movingPkg == null && !wallPanelShowing() && !immichPanelShowing()
+            if (!idleOn && m > 0 && !popupOpen() && movingPkg == null && !wallPanelShowing() && !immichPanelShowing() && !remotePanelShowing()
                     && SystemClock.elapsedRealtime() - lastInput >= m * 60_000L) enterIdle();
             handler.postDelayed(this, 10_000);
         }
@@ -229,6 +229,7 @@ public class MainActivity extends Activity {
             applyTheme();
             if (immichDirty) { immichDirty = false; immichSync(); }
         }
+        if (remotePanelShowing()) closeRemotePanel();
         if (wallPanelShowing()) closeWallPanel();
         if (inputsPopup != null) inputsPopup.dismiss();
         if (wii()) { wiiPage = 0; buildWiiGrid(0, 0); return; }
@@ -238,6 +239,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (remotePanelShowing()) { remoteBack(); return; }
         if (immichPanelShowing()) { immichBack(); return; }
         if (wallPanelShowing()) { closeWallPanel(); return; }
         // Home has nowhere to go back to; Back from the grid returns to the dock.
@@ -378,13 +380,15 @@ public class MainActivity extends Activity {
         themePill.setOnClickListener(v -> cycleTheme());
         wallPill = pill("Wallpapers", "\u25A3");
         wallPill.setOnClickListener(v -> showWallPanel(null));
+        remotePill = pill("Buttons", "\u25C8");
+        remotePill.setOnClickListener(v -> showRemotePanel("main", null));
         TextView inputs = pill("Inputs", "⇥");
         inputs.setOnClickListener(v -> showInputs(v));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{themePill, wallPill, inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{themePill, wallPill, remotePill, inputs, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }
@@ -1047,6 +1051,9 @@ public class MainActivity extends Activity {
         topRow.setClipChildren(false);
         topRow.addView(wiiThemePill, new LinearLayout.LayoutParams(-2, dp(38)));
         topRow.addView(wiiWallPill, llp(-2, dp(38), dp(10), 0, 0, 0));
+        wiiRemotePill = wiiButton("\u25C8  Buttons", "Remote buttons", false);
+        wiiRemotePill.setOnClickListener(v -> showRemotePanel("main", null));
+        topRow.addView(wiiRemotePill, llp(-2, dp(38), dp(10), 0, 0, 0));
         FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
         tp.leftMargin = (int) (W * 0.08f);
         tp.topMargin = dp(16);
@@ -1887,6 +1894,249 @@ public class MainActivity extends Activity {
         applyTheme();
         View f = wii() ? wiiWallPill : wallPill;
         if (f != null) f.requestFocus();
+    }
+
+    // ---------------------------------------------------------------- Remote buttons
+    // Pick what the app buttons on the remote open. Each button is "learned" by pressing it, then an app is chosen.
+    // This needs the accessibility service in ButtonService, which only touches the buttons set up here.
+
+    private static final String[] SLOT_NAMES = {"YouTube", "Netflix", "Disney+", "Paramount+"};
+    private FrameLayout remotePanel;
+    private String remoteView = "main";
+    private String remoteMsg = "";
+    private int learnToken;
+    private TextView remotePill, wiiRemotePill;
+
+    private android.content.SharedPreferences btnPrefs() { return getSharedPreferences(ButtonService.PREFS, MODE_PRIVATE); }
+
+    private boolean remotePanelShowing() { return remotePanel != null && remotePanel.getParent() != null; }
+
+    private boolean buttonServiceOn() {
+        String cur = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (cur == null) return false;
+        String me = new ComponentName(this, ButtonService.class).flattenToString();
+        String shortMe = getPackageName() + "/.ButtonService";
+        for (String x : cur.split(":")) if (x.equals(me) || x.equals(shortMe)) return true;
+        return false;
+    }
+
+    /** Needs WRITE_SECURE_SETTINGS, which the install script grants. Returns false if Android refuses. */
+    private boolean setButtonService(boolean on) {
+        try {
+            android.content.ContentResolver cr = getContentResolver();
+            String cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            String me = new ComponentName(this, ButtonService.class).flattenToString();
+            String shortMe = getPackageName() + "/.ButtonService";
+            List<String> l = new ArrayList<>();
+            if (cur != null) for (String x : cur.split(":")) if (!x.isEmpty() && !x.equals(me) && !x.equals(shortMe)) l.add(x);
+            if (on) l.add(me);
+            Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, android.text.TextUtils.join(":", l));
+            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, l.isEmpty() ? 0 : 1);
+            return true;
+        } catch (SecurityException e) {
+            return false;
+        }
+    }
+
+    private String keyName(int kc, int sc) {
+        if (kc == KeyEvent.KEYCODE_UNKNOWN) return "unnamed key, scan code " + sc;
+        return KeyEvent.keyCodeToString(kc).replace("KEYCODE_", "") + " (scan " + sc + ")";
+    }
+
+    private void remoteStatusSet(String s) {
+        remoteMsg = s;
+        if (!remotePanelShowing()) return;
+        View v = remotePanel.findViewWithTag("rstatus");
+        if (v instanceof TextView) ((TextView) v).setText(s);
+    }
+
+    private void showRemotePanel(String view, String focusTag) {
+        remoteView = view;
+        if (remotePanel == null || remotePanel.getParent() == null) {
+            remotePanel = new FrameLayout(this);
+            remotePanel.setBackgroundColor(0xF2101418);
+            rootView.addView(remotePanel, new FrameLayout.LayoutParams(-1, -1));
+            scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+            wiiLayer.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        }
+        remotePanel.removeAllViews();
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(56), dp(40), dp(56), dp(48));
+        sv.addView(col, new FrameLayout.LayoutParams(-1, -2));
+        remotePanel.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+        if (view.startsWith("pick:")) remotePick(col, Integer.parseInt(view.substring(5)));
+        else { remoteView = "main"; remoteMain(col); }
+        View f = focusTag == null ? null : remotePanel.findViewWithTag(focusTag);
+        if (f == null) f = remotePanel.findViewWithTag("first");
+        if (f == null) f = remotePanel.findViewWithTag("svc");
+        if (f != null) f.requestFocus();
+    }
+
+    private void closeRemotePanel() {
+        ButtonService.learn = null;
+        learnToken++;
+        if (remotePanelShowing()) rootView.removeView(remotePanel);
+        applyTheme();
+        View f = wii() ? wiiRemotePill : remotePill;
+        if (f != null) f.requestFocus();
+    }
+
+    private void remoteBack() {
+        if (remoteView.startsWith("pick:")) showRemotePanel("main", "c" + remoteView.substring(5));
+        else closeRemotePanel();
+    }
+
+    private void remoteMain(LinearLayout col) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText("Remote buttons");
+        col.addView(title);
+        TextView sub = text(13, "sans-serif", 0x99FFFFFF);
+        sub.setText("Choose what the app buttons on your remote open. Only the buttons you set up here are changed.");
+        col.addView(sub, llp(-2, -2, 0, dp(4), 0, dp(20)));
+
+        final boolean on = buttonServiceOn();
+        col.addView(panelLabel("Remote button control"));
+        LinearLayout r0 = chipRow();
+        r0.addView(chip(on ? "On  (press to turn off)" : "Off  (press to turn on)", on, "svc", () -> {
+            boolean want = !buttonServiceOn();
+            if (setButtonService(want)) {
+                remoteMsg = want ? "Turned on. It can take a few seconds to start."
+                        : "Turned off. Your remote works exactly as it did before.";
+            } else {
+                remoteMsg = "Android needs permission for this. Run the install script again (clean-tv.bat option 6), "
+                        + "or switch on Home remote buttons in Settings > Accessibility.";
+                if (want) launch(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }
+            showRemotePanel("main", "svc");
+        }), llp(-2, dp(38), 0, dp(8), 0, 0));
+        col.addView(r0);
+        TextView note = text(12, "sans-serif", 0x99FFFFFF);
+        note.setText(on ? (ButtonService.instance != null ? "Running." : "Starting\u2026 if it stays like this, press Done and come back.")
+                : "Turn this on first. If you never change a button, leave it off and your remote is untouched.");
+        col.addView(note, llp(-2, -2, 0, dp(6), 0, 0));
+
+        for (int i = 0; i < ButtonService.SLOTS; i++) remoteSlot(col, i);
+
+        TextView st = text(13, "sans-serif", 0xCCFFFFFF);
+        st.setTag("rstatus");
+        st.setText(remoteMsg);
+        col.addView(st, llp(-2, -2, 0, dp(18), 0, 0));
+        col.addView(chip("Done", false, "done", () -> closeRemotePanel()), llp(-2, dp(38), 0, dp(14), 0, 0));
+    }
+
+    private void remoteSlot(LinearLayout col, final int i) {
+        android.content.SharedPreferences p = btnPrefs();
+        final int k = p.getInt("k" + i, -1);
+        final String pk = p.getString("p" + i, "");
+        TextView t = text(18, "sans-serif-medium", Color.WHITE);
+        t.setText(SLOT_NAMES[i] + " button");
+        col.addView(t, llp(-2, -2, 0, dp(22), 0, 0));
+        TextView d = text(13, "sans-serif", 0x99FFFFFF);
+        d.setText(k < 0 ? "Not set up yet. Press Learn button, then press it on your remote."
+                : "Detected as " + p.getString("n" + i, "?") + "  \u00B7  "
+                + (pk.isEmpty() ? "opens its original app" : "opens " + p.getString("a" + i, pk)));
+        col.addView(d, llp(-2, -2, 0, dp(2), 0, 0));
+        LinearLayout r = chipRow();
+        r.addView(chip("Learn button", k < 0, "l" + i, () -> remoteLearn(i)), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r.addView(chip("Choose app\u2026", !pk.isEmpty(), "c" + i, () -> {
+            if (k < 0) { remoteStatusSet("Press Learn button for the " + SLOT_NAMES[i] + " button first."); return; }
+            showRemotePanel("pick:" + i, null);
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        r.addView(chip("Back to original", false, "o" + i, () -> {
+            btnPrefs().edit().remove("p" + i).remove("a" + i).apply();
+            ButtonService.reload();
+            remoteMsg = SLOT_NAMES[i] + " button works as it did before.";
+            showRemotePanel("main", "o" + i);
+        }), llp(-2, dp(38), 0, 0, dp(10), 0));
+        col.addView(r, llp(-2, -2, 0, dp(8), 0, 0));
+    }
+
+    private void remoteLearn(final int i) {
+        if (ButtonService.instance == null) {
+            remoteStatusSet(buttonServiceOn() ? "Remote button control is starting. Wait a few seconds and try again."
+                    : "Turn on Remote button control first.");
+            return;
+        }
+        remoteStatusSet("Press the " + SLOT_NAMES[i] + " button on your remote now. The arrows and Back cancel.");
+        final int token = ++learnToken;
+        ButtonService.learn = (kc, sc) -> runOnUiThread(() -> {
+            if (kc < 0) { remoteStatusSet("Cancelled. That button is needed to move around, so it cannot be changed."); return; }
+            android.content.SharedPreferences cur = btnPrefs();
+            android.content.SharedPreferences.Editor ed = cur.edit();
+            for (int j = 0; j < ButtonService.SLOTS; j++) {
+                if (j != i && cur.getInt("k" + j, -1) == kc && cur.getInt("s" + j, -1) == sc) {
+                    ed.remove("k" + j).remove("s" + j).remove("p" + j).remove("a" + j).remove("n" + j);
+                }
+            }
+            ed.putInt("k" + i, kc).putInt("s" + i, sc).putString("n" + i, keyName(kc, sc)).apply();
+            ButtonService.reload();
+            remoteMsg = "Got it: " + keyName(kc, sc) + ". Now choose an app for it.";
+            if (remotePanelShowing()) showRemotePanel("main", "c" + i);
+        });
+        handler.postDelayed(() -> {
+            if (token == learnToken && ButtonService.learn != null) {
+                ButtonService.learn = null;
+                remoteStatusSet("No button was pressed.");
+            }
+        }, 12000);
+    }
+
+    private void remotePick(LinearLayout col, final int slot) {
+        TextView title = text(30, "sans-serif-light", Color.WHITE);
+        title.setText("Open which app?");
+        col.addView(title);
+        TextView hint = text(13, "sans-serif", 0x99FFFFFF);
+        hint.setText("Press OK on the app the " + SLOT_NAMES[slot] + " button should open.");
+        col.addView(hint, llp(-2, -2, 0, dp(4), 0, dp(14)));
+        final PackageManager pm = getPackageManager();
+        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        final List<ResolveInfo> ris = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
+            String p = ri.activityInfo.packageName;
+            if (!p.equals(getPackageName()) && seen.add(p)) ris.add(ri);
+        }
+        Collections.sort(ris, (a, b) -> String.valueOf(a.loadLabel(pm)).compareToIgnoreCase(String.valueOf(b.loadLabel(pm))));
+        final String cur = btnPrefs().getString("p" + slot, "");
+        final LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        host.setClipChildren(false);
+        col.addView(host);
+        final int perRow = 5, tw = cardWidth(perRow), th = tw * 9 / 16;
+        int[] n = {0};
+        LinearLayout[] row = {null};
+        for (final ResolveInfo ri : ris) {
+            final String pkgName = ri.activityInfo.packageName;
+            final String label = String.valueOf(ri.loadLabel(pm));
+            final FrameLayout card = immichCard(tw, th, label, pkgName.equals(cur));
+            if (n[0] == 0) card.setTag("first");
+            ImageView iv = (ImageView) card.findViewWithTag("img");
+            Drawable art = ri.activityInfo.loadBanner(pm);
+            if (art == null) art = ri.activityInfo.applicationInfo.loadBanner(pm);
+            if (art != null) {
+                iv.setImageDrawable(art);
+            } else {
+                iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                iv.setPadding(dp(16), dp(6), dp(16), dp(26));
+                iv.setImageDrawable(ri.loadIcon(pm));
+            }
+            card.setOnClickListener(v -> {
+                btnPrefs().edit().putString("p" + slot, pkgName).putString("a" + slot, label).apply();
+                ButtonService.reload();
+                remoteMsg = label + " now opens when you press the " + SLOT_NAMES[slot] + " button.";
+                showRemotePanel("main", "c" + slot);
+            });
+            gridAdd(host, n, row, card, perRow, tw, th);
+        }
+        if (ris.isEmpty()) {
+            TextView none = text(14, "sans-serif", 0xB3FFFFFF);
+            none.setText("No apps found.");
+            col.addView(none);
+        }
+        col.addView(chip("Cancel", false, "done", () -> showRemotePanel("main", "c" + slot)), llp(-2, dp(38), 0, dp(24), 0, 0));
     }
 
     // ---------------------------------------------------------------- Immich photos
